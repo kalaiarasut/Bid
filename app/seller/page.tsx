@@ -20,8 +20,6 @@ export default function SellerPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
-      
-      {/* Top Navigation Bar with activeTab="seller" */}
       <Navbar
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -31,8 +29,6 @@ export default function SellerPage() {
         onOpenNotificationDrawer={() => setIsNotificationDrawerOpen(true)}
         activeTab="seller"
       />
-
-      {/* Main Seller Command Center */}
       <main className="flex-1">
         <SellerDashboard
           key={refreshKey}
@@ -41,38 +37,24 @@ export default function SellerPage() {
           onOpenAiDrawer={() => setIsAiDrawerOpen(true)}
         />
       </main>
-
-      {/* Create Listing Modal */}
       <CreateListingModal
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
-        onSuccess={() => {
-          setRefreshKey((k) => k + 1);
-        }}
+        onSuccess={() => setRefreshKey((k) => k + 1)}
       />
-
-      {/* Auction Detail Modal */}
       {selectedListingId && (
         <AuctionDetailModal
           isOpen={true}
           listingId={selectedListingId}
           onClose={() => setSelectedListingId(null)}
-          onBidSuccess={() => {
-            setRefreshKey((k) => k + 1);
-          }}
-          onListingUpdated={() => {
-            setRefreshKey((k) => k + 1);
-          }}
+          onBidSuccess={() => setRefreshKey((k) => k + 1)}
+          onListingUpdated={() => setRefreshKey((k) => k + 1)}
         />
       )}
-
-      {/* Wishlist Alerts Modal */}
       <WishlistModal
         isOpen={isWishlistModalOpen}
         onClose={() => setIsWishlistModalOpen(false)}
       />
-
-      {/* Real-time Notification Drawer */}
       <NotificationDrawer
         isOpen={isNotificationDrawerOpen}
         onClose={() => setIsNotificationDrawerOpen(false)}
@@ -81,8 +63,6 @@ export default function SellerPage() {
           setSelectedListingId(id);
         }}
       />
-
-      {/* AI Assistant Drawer */}
       <AiAssistantDrawer
         isOpen={isAiDrawerOpen}
         onClose={() => setIsAiDrawerOpen(false)}
@@ -91,7 +71,7 @@ export default function SellerPage() {
           setSelectedListingId(id);
         }}
       />
-
     </div>
   );
 }
+
