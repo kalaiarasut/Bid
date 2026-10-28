@@ -1,258 +1,475 @@
-import React from "react";
+"use client";
+
+import React, { useState, useEffect, useMemo } from "react";
 import { 
   Gavel, 
   Search, 
   Clock, 
   ChevronRight, 
-  ChevronLeft, 
   Filter, 
   Sparkles, 
-  Bike, 
-  Calculator, 
-  BookOpen, 
-  Laptop, 
-  FlaskConical, 
-  Bed, 
-  Dumbbell,
-  ArrowUpDown
+  ArrowUpDown,
+  RefreshCcw,
+  PlusCircle,
+  AlertCircle,
+  ShieldCheck,
+  CheckCircle2
 } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
-
-const SAMPLE_AUCTIONS = [
-  {
-    id: "1",
-    title: "Hercules Roadeo Hardliner 21-Speed Cycle",
-    category: "Cycles",
-    location: "Hostel 7, West Campus",
-    imageUrl: "https://images.unsplash.com/photo-1485965120184-e220f721d03e?auto=format&fit=crop&w=800&q=80",
-    currentBid: 2450,
-    startingPrice: 1500,
-    bidsCount: 14,
-    endsIn: "ENDS IN 45M",
-    urgent: true,
-  },
-  {
-    id: "2",
-    title: "Casio fx-991EX ClassWiz Advanced Scientific Calculator",
-    category: "Calculators",
-    location: "Hostel 3, North Campus",
-    imageUrl: "https://images.unsplash.com/photo-1594980596870-8aa52a78d8cd?auto=format&fit=crop&w=800&q=80",
-    currentBid: 620,
-    startingPrice: 300,
-    bidsCount: 8,
-    endsIn: "ENDS TODAY",
-    urgent: false,
-  },
-  {
-    id: "3",
-    title: "Core Engineering Textbooks Bundle (Vol 1-4)",
-    category: "Books",
-    location: "Hostel 12, South Campus",
-    imageUrl: "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80",
-    currentBid: 480,
-    startingPrice: 200,
-    bidsCount: 6,
-    endsIn: "ENDS IN 2H",
-    urgent: false,
-  },
-  {
-    id: "4",
-    title: "Dell 24\" IPS 75Hz Monitor (with HDMI & power cord)",
-    category: "Electronics",
-    location: "Hostel 4, East Campus",
-    imageUrl: "https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?auto=format&fit=crop&w=800&q=80",
-    currentBid: 4100,
-    startingPrice: 2500,
-    bidsCount: 19,
-    endsIn: "ENDS TODAY",
-    urgent: false,
-  },
-];
-
-const CATEGORIES = [
-  { name: "All Auctions", icon: Gavel },
-  { name: "Cycles", icon: Bike },
-  { name: "Calculators", icon: Calculator },
-  { name: "Books & Notes", icon: BookOpen },
-  { name: "Electronics", icon: Laptop },
-  { name: "Lab Equipment", icon: FlaskConical },
-  { name: "Hostel Furniture", icon: Bed },
-  { name: "Sports & Fitness", icon: Dumbbell },
-];
+import { supabase } from "@/lib/supabase";
+import { useUser } from "@/components/UserContext";
+import { Navbar } from "@/components/Navbar";
+import { CategoryCarousel } from "@/components/CategoryCarousel";
+import { FilterSidebar, FilterState } from "@/components/FilterSidebar";
+import { AuctionCard, AuctionItem } from "@/components/AuctionCard";
+import { AuctionDetailModal } from "@/components/AuctionDetailModal";
+import { CreateListingModal } from "@/components/CreateListingModal";
+import { WishlistModal } from "@/components/WishlistModal";
+import { NotificationDrawer } from "@/components/NotificationDrawer";
+import { AiAssistantDrawer } from "@/components/AiAssistantDrawer";
+import { SellerDashboard } from "@/components/SellerDashboard";
 
 export default function HomePage() {
+  const { currentUser } = useUser();
+
+  const [listings, setListings] = useState<AuctionItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Modals & Drawers State
+  const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isWishlistModalOpen, setIsWishlistModalOpen] = useState(false);
+  const [isNotificationDrawerOpen, setIsNotificationDrawerOpen] = useState(false);
+  const [isAiDrawerOpen, setIsAiDrawerOpen] = useState(false);
+
+  // Search & Filters State
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("all");
+  const [filters, setFilters] = useState<FilterState>({
+    category: "all",
+    condition: [],
+    minPrice: "",
+    maxPrice: "",
+    urgency: "all",
+    location: "",
+  });
+  const [sortBy, setSortBy] = useState<string>("closing_soon");
+  const [activeTab, setActiveTab] = useState<"auctions" | "seller">("auctions");
+
+  // Fetch listings from Supabase
+  const fetchListings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("listings")
+        .select(`
+          id,
+          seller_id,
+          title,
+          category,
+          description,
+          condition,
+          images,
+          starting_price,
+          reserve_price,
+          min_bid_increment,
+          current_price,
+          highest_bidder_id,
+          status,
+          start_time,
+          end_time,
+          handover_location,
+          handover_status,
+          view_count,
+          winning_bid_id,
+          seller:seller_id (
+            full_name,
+            rating
+          ),
+          highest_bidder:highest_bidder_id (
+            full_name
+          )
+        `)
+        .order("end_time", { ascending: true });
+
+      if (error) {
+        console.error("Error fetching listings:", error);
+        return;
+      }
+
+      if (data) {
+        // Also fetch bid counts per listing
+        const { data: bidsData } = await supabase
+          .from("bids")
+          .select("listing_id");
+
+        const countsMap: Record<string, number> = {};
+        if (bidsData) {
+          bidsData.forEach((b) => {
+            countsMap[b.listing_id] = (countsMap[b.listing_id] || 0) + 1;
+          });
+        }
+
+        const formatted: AuctionItem[] = data.map((item: any) => ({
+          id: item.id,
+          seller_id: item.seller_id,
+          title: item.title,
+          category: item.category,
+          description: item.description,
+          condition: item.condition,
+          images: item.images || [],
+          starting_price: Number(item.starting_price),
+          reserve_price: Number(item.reserve_price),
+          min_bid_increment: Number(item.min_bid_increment),
+          current_price: Number(item.current_price),
+          highest_bidder_id: item.highest_bidder_id,
+          status: item.status,
+          start_time: item.start_time,
+          end_time: item.end_time,
+          handover_location: item.handover_location,
+          handover_status: item.handover_status,
+          seller_name: item.seller?.full_name,
+          seller_rating: item.seller?.rating,
+          highest_bidder_name: item.highest_bidder?.full_name,
+          bids_count: countsMap[item.id] || 0,
+        }));
+
+        setListings(formatted);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchListings();
+  }, []);
+
+  // Supabase Realtime Subscription for instantaneous updates
+  useEffect(() => {
+    const channel = supabase
+      .channel("home-listings-live")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "listings" },
+        () => {
+          fetchListings();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "bids" },
+        () => {
+          fetchListings();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // Sync Category Carousel with Filters
+  const handleSelectCategory = (cat: string) => {
+    setSelectedCategory(cat);
+    setFilters((prev) => ({ ...prev, category: cat }));
+  };
+
+  // Compute Counts for Badges
+  const categoryCounts = useMemo(() => {
+    const map: Record<string, number> = { all: listings.length };
+    listings.forEach((item) => {
+      map[item.category] = (map[item.category] || 0) + 1;
+    });
+    return map;
+  }, [listings]);
+
+  const conditionCounts = useMemo(() => {
+    const map: Record<string, number> = {};
+    listings.forEach((item) => {
+      map[item.condition] = (map[item.condition] || 0) + 1;
+    });
+    return map;
+  }, [listings]);
+
+  // Filtered & Sorted Items
+  const filteredListings = useMemo(() => {
+    return listings
+      .filter((item) => {
+        // Keyword Search
+        if (searchQuery.trim()) {
+          const q = searchQuery.toLowerCase();
+          const matchTitle = item.title.toLowerCase().includes(q);
+          const matchDesc = item.description?.toLowerCase().includes(q);
+          const matchCat = item.category.toLowerCase().includes(q);
+          const matchLoc = item.handover_location?.toLowerCase().includes(q);
+          if (!matchTitle && !matchDesc && !matchCat && !matchLoc) {
+            return false;
+          }
+        }
+
+        // Category
+        if (filters.category !== "all") {
+          if (item.category.toLowerCase() !== filters.category.toLowerCase()) {
+            return false;
+          }
+        }
+
+        // Condition
+        if (filters.condition.length > 0) {
+          if (!filters.condition.includes(item.condition)) {
+            return false;
+          }
+        }
+
+        // Price Range
+        if (filters.minPrice && item.current_price < parseFloat(filters.minPrice)) {
+          return false;
+        }
+        if (filters.maxPrice && item.current_price > parseFloat(filters.maxPrice)) {
+          return false;
+        }
+
+        // Urgency / Status
+        const now = Date.now();
+        const end = new Date(item.end_time).getTime();
+        const diffMinutes = (end - now) / (1000 * 60);
+
+        if (filters.urgency === "closing_soon") {
+          if (item.status !== "active" || diffMinutes <= 0 || diffMinutes > 60) {
+            return false;
+          }
+        } else if (filters.urgency === "active") {
+          if (item.status !== "active" || diffMinutes <= 0) {
+            return false;
+          }
+        } else if (filters.urgency === "ended") {
+          if (item.status === "active" && diffMinutes > 0) {
+            return false;
+          }
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        const timeA = new Date(a.end_time).getTime();
+        const timeB = new Date(b.end_time).getTime();
+
+        if (sortBy === "closing_soon") {
+          return timeA - timeB;
+        } else if (sortBy === "price_asc") {
+          return a.current_price - b.current_price;
+        } else if (sortBy === "price_desc") {
+          return b.current_price - a.current_price;
+        } else if (sortBy === "most_bids") {
+          return (b.bids_count || 0) - (a.bids_count || 0);
+        } else if (sortBy === "newest") {
+          return new Date(b.start_time).getTime() - new Date(a.start_time).getTime();
+        }
+        return 0;
+      });
+  }, [listings, searchQuery, filters, sortBy]);
+
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col text-slate-900">
-      {/* Top Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16 gap-4">
-            {/* Logo */}
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-red-600 flex items-center justify-center text-white shadow-sm font-black text-xl tracking-tighter">
-                CB
-              </div>
-              <div className="flex flex-col">
-                <span className="font-extrabold text-lg text-slate-900 tracking-tight leading-none">
-                  campus<span className="text-red-600">bid</span>
-                </span>
-                <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider mt-0.5">
-                  Fair Student Auctions
-                </span>
-              </div>
-            </div>
+    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
+      
+      {/* Top Navigation */}
+      <Navbar
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        onOpenCreateModal={() => setIsCreateModalOpen(true)}
+        onOpenAiDrawer={() => setIsAiDrawerOpen(true)}
+        onOpenWishlistModal={() => setIsWishlistModalOpen(true)}
+        onOpenNotificationDrawer={() => setIsNotificationDrawerOpen(true)}
+        activeTab={activeTab}
+        onTabChange={(tab) => setActiveTab(tab)}
+      />
 
-            {/* Quick Search */}
-            <div className="hidden md:flex flex-1 max-w-md mx-6">
-              <div className="relative w-full">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Search cycles, calculators, books, hostel items..."
-                  className="w-full pl-10 pr-4 py-2 bg-slate-100 hover:bg-slate-50 focus:bg-white text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all"
-                />
-              </div>
-            </div>
+      {activeTab === "seller" ? (
+        <main className="flex-1 w-full">
+          <SellerDashboard
+            onOpenCreateListing={() => setIsCreateModalOpen(true)}
+            onOpenDetailModal={(id) => setSelectedListingId(id)}
+            onOpenAiDrawer={() => setIsAiDrawerOpen(true)}
+          />
+        </main>
+      ) : (
+        <>
+          {/* Category Carousel Strip */}
+          <CategoryCarousel
+            selectedCategory={selectedCategory}
+            onSelectCategory={handleSelectCategory}
+            categoryCounts={categoryCounts}
+          />
 
-            {/* Right Nav */}
-            <nav className="flex items-center gap-3">
-              <button className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-md transition-colors">
-                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                AI Assistant
-              </button>
-              <button className="px-3.5 py-1.5 text-sm font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors">
-                List Item
-              </button>
-              <button className="btn-bid-solid text-xs px-3.5 py-1.5 font-medium">
-                Student Sign In
-              </button>
-            </nav>
-          </div>
-        </div>
+          {/* Main Two-Column Auction Layout */}
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full flex-1">
+            <div className="flex flex-col lg:flex-row gap-6 items-start">
+              
+              {/* Left Column: Filter Sidebar */}
+              <FilterSidebar
+                filters={filters}
+                onFilterChange={setFilters}
+                onResetFilters={() => {
+                  setFilters({
+                    category: "all",
+                    condition: [],
+                    minPrice: "",
+                    maxPrice: "",
+                    urgency: "all",
+                    location: "",
+                  });
+                  setSelectedCategory("all");
+                  setSearchQuery("");
+                }}
+                categoryCounts={categoryCounts}
+                conditionCounts={conditionCounts}
+                totalCount={filteredListings.length}
+              />
 
-        {/* Categories Bar */}
-        <div className="border-t border-slate-100 bg-white">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center gap-2 py-2.5 overflow-x-auto no-scrollbar">
-              <button className="p-1 rounded text-slate-400 hover:text-slate-600 shrink-0">
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <div className="flex items-center gap-2 shrink-0">
-                {CATEGORIES.map((cat, idx) => {
-                  const Icon = cat.icon;
-                  return (
-                    <button
-                      key={cat.name}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
-                        idx === 0
-                          ? "bg-red-50 border-red-200 text-red-700 font-semibold"
-                          : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                      }`}
-                    >
-                      <Icon className="w-3.5 h-3.5" />
-                      <span>{cat.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              <button className="p-1 rounded text-slate-400 hover:text-slate-600 shrink-0">
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content Area */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full flex-1">
-        {/* Breadcrumb & Title */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-          <div>
-            <div className="text-xs text-slate-500 font-medium mb-1">
-              Campus Auctions &rsaquo; West &amp; North Hostels &rsaquo; Ending Soon
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-              All Active Auctions
-            </h1>
-            <p className="text-xs text-slate-500 mt-1">
-              Verified campus listings &bull; 100% transparent bidding history &bull; Last-minute anti-sniping enabled
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2.5">
-            <button className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50 shadow-subtle">
-              <Filter className="w-3.5 h-3.5" />
-              Filters
-            </button>
-            <button className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50 shadow-subtle">
-              <ArrowUpDown className="w-3.5 h-3.5" />
-              Closing Soonest
-            </button>
-          </div>
-        </div>
-
-        {/* Auction Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          {SAMPLE_AUCTIONS.map((item) => (
-            <div key={item.id} className="auction-card group">
-              {/* Image Container with Badge */}
-              <div className="relative aspect-[4/3] bg-slate-100 overflow-hidden">
-                <img
-                  src={item.imageUrl}
-                  alt={item.title}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                />
-                <div className="absolute top-2.5 left-2.5">
-                  <span
-                    className={
-                      item.urgent ? "badge-timer-urgent" : "badge-timer"
-                    }
-                  >
-                    <Clock className="w-3 h-3" />
-                    {item.endsIn}
-                  </span>
-                </div>
-              </div>
-
-              {/* Card Body */}
-              <div className="p-4 flex flex-col flex-1 justify-between gap-3">
-                <div>
-                  <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
-                    {item.category} &bull; {item.location}
+              {/* Right Column: Auction Feed */}
+              <div className="flex-1 w-full space-y-4">
+                
+                {/* Top Toolbar */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
+                  <div>
+                    <h1 className="text-base sm:text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
+                      <span>Campus Auctions</span>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600">
+                        {filteredListings.length} items
+                      </span>
+                    </h1>
+                    <p className="text-[11px] text-slate-500">
+                      Fair bidding • Automatic anti-sniping (+60s under 30s) • Public transparent history
+                    </p>
                   </div>
-                  <h3 className="text-sm font-bold text-slate-900 line-clamp-2 leading-snug group-hover:text-red-600 transition-colors">
-                    {item.title}
-                  </h3>
-                </div>
 
-                <div className="pt-2 border-t border-slate-100">
-                  <div className="flex items-baseline justify-between mb-2">
-                    <span className="text-xs text-slate-500">Current Bid</span>
-                    <span className="text-xs font-medium text-slate-500">
-                      {item.bidsCount} bids
+                  {/* Sort Selector */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider shrink-0">
+                      Sort:
                     </span>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value)}
+                      className="px-2.5 py-1.5 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-lg text-slate-800 focus:outline-hidden focus:ring-1 focus:ring-red-500"
+                    >
+                      <option value="closing_soon">Closing Soonest</option>
+                      <option value="price_asc">Price: Low to High</option>
+                      <option value="price_desc">Price: High to Low</option>
+                      <option value="most_bids">Most Bids</option>
+                      <option value="newest">Newest Listed</option>
+                    </select>
                   </div>
-                  <div className="text-xl font-extrabold text-slate-900 tracking-tight mb-3">
-                    {formatCurrency(item.currentBid)}
-                  </div>
-
-                  <button className="btn-bid w-full group-hover:bg-red-600 group-hover:text-white transition-colors">
-                    Bid Now
-                  </button>
                 </div>
+
+                {/* Auction Cards Grid */}
+                {loading ? (
+                  <div className="py-24 text-center space-y-3">
+                    <div className="w-8 h-8 border-3 border-red-600 border-t-transparent rounded-full animate-spin mx-auto" />
+                    <div className="text-xs font-medium text-slate-500">
+                      Loading verified campus auctions...
+                    </div>
+                  </div>
+                ) : filteredListings.length === 0 ? (
+                  <div className="py-20 text-center bg-white rounded-xl border border-dashed border-slate-300 p-8 space-y-3">
+                    <Gavel className="w-10 h-10 text-slate-300 mx-auto" />
+                    <div className="text-sm font-bold text-slate-700">
+                      No auctions matched your filters
+                    </div>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                      Try adjusting your price range, condition, or search keyword, or clear all filters to see all campus items.
+                    </p>
+                    <button
+                      onClick={() => {
+                        setFilters({
+                          category: "all",
+                          condition: [],
+                          minPrice: "",
+                          maxPrice: "",
+                          urgency: "all",
+                          location: "",
+                        });
+                        setSelectedCategory("all");
+                        setSearchQuery("");
+                      }}
+                      className="px-4 py-2 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 transition-colors inline-flex items-center gap-1.5"
+                    >
+                      <RefreshCcw className="w-3.5 h-3.5" />
+                      Clear All Filters
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredListings.map((item) => (
+                      <AuctionCard
+                        key={item.id}
+                        item={item}
+                        onSelect={(it) => setSelectedListingId(it.id)}
+                        currentUserId={currentUser.id}
+                      />
+                    ))}
+                  </div>
+                )}
+
               </div>
+
             </div>
-          ))}
-        </div>
-      </main>
+          </div>
+        </>
+      )}
 
       {/* Footer */}
       <footer className="border-t border-slate-200 bg-white py-6 mt-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-xs text-slate-500">
-          <p className="font-semibold text-slate-700">CampusBid &bull; Fair-Bidding Auction Marketplace</p>
-          <p className="mt-1">Connecting graduating seniors with juniors for fair, verified on-campus item handovers.</p>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-slate-900">CampusBid</span>
+            <span>•</span>
+            <span>Fair Student Auction Marketplace</span>
+          </div>
+          <div className="text-center sm:text-right text-[11px] text-slate-400">
+            PostgreSQL Atomic Locking • Real-Time Anti-Sniping • Gemini AI Assistant
+          </div>
         </div>
       </footer>
+
+      {/* Modals & Slide-over Drawers */}
+      {selectedListingId && (
+        <AuctionDetailModal
+          listingId={selectedListingId}
+          onClose={() => setSelectedListingId(null)}
+          onBidSuccess={() => {
+            fetchListings();
+          }}
+        />
+      )}
+
+      <CreateListingModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onSuccess={() => {
+          fetchListings();
+        }}
+      />
+
+      <WishlistModal
+        isOpen={isWishlistModalOpen}
+        onClose={() => setIsWishlistModalOpen(false)}
+      />
+
+      <NotificationDrawer
+        isOpen={isNotificationDrawerOpen}
+        onClose={() => setIsNotificationDrawerOpen(false)}
+        onSelectListing={(id: string) => setSelectedListingId(id)}
+      />
+
+      <AiAssistantDrawer
+        isOpen={isAiDrawerOpen}
+        onClose={() => setIsAiDrawerOpen(false)}
+        onSelectListing={(id: string) => setSelectedListingId(id)}
+      />
+
     </div>
   );
 }
