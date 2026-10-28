@@ -4,27 +4,27 @@ import Image from "next/image";
 export default function NotFound() {
   return (
     <main className="min-h-screen w-full bg-[#171717] text-white flex flex-col items-center justify-center px-4 py-8 antialiased select-none font-sans">
-      <div className="w-full max-w-[500px] flex flex-col items-center text-center">
+      <div className="w-full max-w-[500px] flex flex-col items-center text-center mx-auto">
         {/* Header Title */}
         <div className="mb-4">
-          <h1 className="text-[30px] sm:text-[36px] font-bold text-white tracking-tight leading-tight">
+          <h1 className="text-[28px] sm:text-[36px] font-bold text-white tracking-tight leading-tight">
             You&apos;re Drunk !
           </h1>
-          <h2 className="text-[30px] sm:text-[36px] font-bold tracking-tight leading-tight mt-1">
+          <h2 className="text-[28px] sm:text-[36px] font-bold tracking-tight leading-tight mt-1">
             <span className="text-white">Go </span>
             <span className="text-[#FFE020]">Home</span>
           </h2>
         </div>
 
         {/* Peter Griffin Illustration & 404 */}
-        <div className="relative w-full max-w-[360px] aspect-[370/178] my-2 flex items-center justify-center">
+        <div className="my-2 flex items-center justify-center">
           <Image
             src="/peter-404-scene-2x.png"
             alt="Peter Griffin sitting drunk at a bar booth - 404 Not Found"
-            fill
+            width={370}
+            height={178}
             priority
-            sizes="(max-width: 640px) 340px, 360px"
-            className="object-contain pointer-events-none"
+            className="w-[320px] sm:w-[370px] h-auto object-contain pointer-events-none block"
           />
         </div>
 
