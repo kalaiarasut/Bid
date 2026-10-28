@@ -104,62 +104,48 @@ export function Navbar({
             </nav>
           </div>
 
-          {/* Search Bar with Ctrl+K shortcut cue */}
-          <div className="flex-1 max-w-md mx-2">
-            <div className="relative">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search cycles, calculators, books, hostel items..."
-                value={searchQuery}
-                onChange={(e) => onSearchChange(e.target.value)}
-                className="w-full pl-10 pr-12 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-red-500 focus:bg-white focus:border-red-500 transition-all text-slate-900 placeholder:text-slate-400 font-medium"
-              />
-              {searchQuery ? (
-                <button
-                  onClick={() => onSearchChange("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600"
-                >
-                  ✕
-                </button>
-              ) : (
-                <span className="hidden sm:inline absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-sm border border-slate-200">
-                  Ctrl K
-                </span>
-              )}
+          {/* Search Bar with Ctrl+K shortcut cue (Hidden on Seller Dashboard) */}
+          {activeTab !== "seller" && (
+            <div className="flex-1 max-w-md mx-2">
+              <div className="relative">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search cycles, calculators, books, hostel items..."
+                  value={searchQuery}
+                  onChange={(e) => onSearchChange(e.target.value)}
+                  className="w-full pl-10 pr-12 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-red-500 focus:bg-white focus:border-red-500 transition-all text-slate-900 placeholder:text-slate-400 font-medium"
+                />
+                {searchQuery ? (
+                  <button
+                    onClick={() => onSearchChange("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600"
+                  >
+                    ✕
+                  </button>
+                ) : (
+                  <span className="hidden sm:inline absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-sm border border-slate-200">
+                    Ctrl K
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2 shrink-0">
             
-            {/* AI Assistant Pill */}
-            <button
-              onClick={onOpenAiDrawer}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 transition-colors shadow-2xs"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-              <span>AI Assistant</span>
-            </button>
-
-            {/* Never Miss / Wishlist Alerts */}
-            <button
-              onClick={onOpenWishlistModal}
-              title="Never Miss What You Need (Wishlist Alerts)"
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg text-slate-700 hover:bg-slate-100 border border-slate-200 transition-colors"
-            >
-              <Bookmark className="w-3.5 h-3.5 text-slate-500" />
-              <span className="hidden lg:inline">Alerts</span>
-            </button>
-
-            {/* List Item Button */}
-            <button
-              onClick={onOpenCreateModal}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors shadow-xs"
-            >
-              <PlusCircle className="w-3.5 h-3.5" />
-              <span>Sell Item</span>
-            </button>
+            {/* Never Miss / Wishlist Alerts (Hidden on Seller Dashboard) */}
+            {activeTab !== "seller" && (
+              <button
+                onClick={onOpenWishlistModal}
+                title="Never Miss What You Need (Wishlist Alerts)"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg text-slate-700 hover:bg-slate-100 border border-slate-200 transition-colors"
+              >
+                <Bookmark className="w-3.5 h-3.5 text-slate-500" />
+                <span className="hidden lg:inline">Alerts</span>
+              </button>
+            )}
 
             {/* Notification Bell */}
             <button
@@ -174,6 +160,15 @@ export function Navbar({
                 </span>
               )}
             </button>
+
+            {/* Log In Link */}
+            <Link
+              href="/login"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 text-slate-800 hover:bg-slate-100 transition-colors shadow-2xs"
+            >
+              <User className="w-3.5 h-3.5" />
+              <span>Log In</span>
+            </Link>
 
             {/* Student Switcher Dropdown */}
             <div className="relative ml-1">

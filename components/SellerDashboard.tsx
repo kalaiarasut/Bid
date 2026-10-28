@@ -525,7 +525,7 @@ export function SellerDashboard({
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-r from-[#fae8eb] via-[#f7d6dd] to-[#36131f] p-4 sm:p-6 lg:p-8 flex justify-center items-start">
+    <div className="min-h-screen bg-gradient-to-br from-[#fee2e2] via-[#b91c1c]/70 to-[#450a0a] p-4 sm:p-6 lg:p-8 flex justify-center items-start">
       
       {/* Toast Alert Banner */}
       {toast && (
@@ -650,13 +650,13 @@ export function SellerDashboard({
             <span>Templates</span>
           </button>
 
-          {/* Primary Action Button: + Create workflow / + Create listing in deep wine */}
+          {/* Primary Action Button: Create listing in brand crimson */}
           <button
             onClick={onOpenCreateListing}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#331320] hover:bg-[#47192c] text-white text-sm font-medium shadow-xs transition-colors"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium shadow-xs transition-colors"
           >
             <Plus className="w-4 h-4 text-white" />
-            <span>+ Create listing</span>
+            <span>Create listing</span>
           </button>
 
         </div>
