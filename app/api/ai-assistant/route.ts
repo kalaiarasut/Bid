@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { supabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +14,7 @@ export interface RequestBody {
   history?: ChatMessage[];
   userId?: string;
   userBudget?: number;
+  audioInput?: boolean;
 }
 
 export interface ListingItemPreview {
@@ -45,7 +46,7 @@ export interface ProposedBidData {
   image: string | null;
   end_time: string;
   handover_location: string | null;
-  // Alternative keys for backward-compatibility with other components
+  // Compatibility aliases
   listingId?: string;
   itemTitle?: string;
   currentPrice?: number;
@@ -58,30 +59,36 @@ export interface ApiResponse {
   response: string;
   items?: ListingItemPreview[];
   proposedBid?: ProposedBidData | null;
+  models?: {
+    text: string;
+    audio: string;
+  };
 }
 
 const SYSTEM_INSTRUCTION = `
 You are CampusBid AI, the official intelligent assistant for university student auctions on CampusBid.
-Your job is to help college students buy and sell pre-owned campus essentials (cycles, scientific calculators, textbooks, hostel monitors, dorm furniture).
+Models active: Gemini 3.5 Flash Lite for ultra-fast text reasoning, Gemini 3.8 Live for live audio interaction.
 
-CRITICAL SAFETY & PRIVACY GUARDRAILS:
-1. SAFE BIDDING WORKFLOW:
-   - YOU MUST NEVER EXECUTE OR FINALIZE A BID DIRECTLY.
-   - When a student asks or hints to bid on an item (e.g. "bid 4250 on the cycle", "I want to bid on the Casio", "place a bid of ₹900"), you MUST invoke the 'propose_bid' function.
-   - In your response text, explicitly state: "I've drafted a safe proposed bid card for you below. Please review the amount and click 'Confirm & Place Bid' to authorize it."
-   - Emphasize that anti-sniping protection extends auctions by 60 seconds if a bid occurs in the final 30 seconds.
-2. STRICT BUDGET GUARDRAILS:
-   - Respect the student's stated budget ceiling at all times.
-   - If a listing's minimum bid exceeds the student's stated budget, notify them politely and search for active alternatives within their budget.
-3. STUDENT PRIVACY GUARANTEE:
-   - NEVER disclose private personal data (student room numbers, private mobile numbers, personal email addresses).
-   - Only reveal verified public listing information: title, condition, current price, minimum bid increment, public campus handover location (e.g. 'Hostel 3 Mess Porch', 'Central Library Entrance'), and auction end time.
-4. GROUNDED REAL-TIME DATA:
-   - Always call 'search_listings' or 'get_listing_details' before speaking about item availability or pricing. Never invent or hallucinate listings.
-   - Present monetary amounts clearly in Indian Rupees (₹).
+CRITICAL RULES & CORE PHILOSOPHY:
+Some students don’t want to search and compare at all. They would rather say "find me a cycle under ₹2,000" and get a straight answer, and maybe have the app bid for them.
+The assistant plays by the same rules as everyone else:
+1. NEVER ACT WITHOUT THE STUDENT'S GO-AHEAD:
+   - You NEVER execute a bid directly on your own.
+   - When a student asks or agrees to bid (e.g. "bid for me on the cycle up to ₹2,000", "place a bid of ₹1,500"), you draft a safe authorization card for them.
+   - Explicitly inform the student: "I have drafted a safe authorization card for you. Please click 'Confirm & Place Bid' on screen to authorize it."
+2. NEVER GO PAST THE AGREED LIMIT:
+   - Strictly honor their agreed budget ceiling (e.g. max ₹2,000).
+   - If proxy bidding is authorized, you guarantee the system will NEVER bid a single rupee beyond their agreed limit.
+3. NEVER REVEAL OTHER STUDENTS' ACCOUNT DETAILS:
+   - Never disclose phone numbers, email addresses, student IDs, or hostel room numbers.
+   - Bidders are pseudonymous (e.g. "Bidder #34", "Junior from Hostel 7").
+   - Handovers occur safely in designated campus areas (e.g. Hostel Mess Porch, Library Gates).
+4. STRAIGHT, DIRECT ANSWERS:
+   - Give straight, clear answers immediately highlighting the matching item and price in Indian Rupees (₹).
+   - Never force the student to search or compare on their own.
 `;
 
-// Helper: Query listings from Supabase
+// Helper: Query listings from Supabase with robust category/price filtering
 async function executeSearchListings(params: {
   query?: string;
   category?: string;
@@ -92,10 +99,8 @@ async function executeSearchListings(params: {
   try {
     let q = supabase
       .from("listings")
-      .select("id, title, category, condition, starting_price, current_price, min_bid_increment, images, end_time, handover_location, status, description");
-
-    // Only active listings for bidding
-    q = q.eq("status", "active");
+      .select("id, title, category, condition, starting_price, current_price, min_bid_increment, images, end_time, handover_location, status, description")
+      .eq("status", "active");
 
     if (params.category && params.category.trim()) {
       q = q.ilike("category", `%${params.category.trim()}%`);
@@ -146,54 +151,6 @@ async function executeSearchListings(params: {
   }
 }
 
-// Helper: Get details of a single listing
-async function executeGetListingDetails(listingId: string): Promise<{
-  listing: ListingItemPreview | null;
-  total_bids: number;
-  leading_bid: number | null;
-}> {
-  try {
-    const { data: listing, error: lError } = await supabase
-      .from("listings")
-      .select("id, title, category, condition, starting_price, current_price, min_bid_increment, images, end_time, handover_location, status, description, highest_bidder_id")
-      .eq("id", listingId)
-      .maybeSingle();
-
-    if (lError || !listing) {
-      return { listing: null, total_bids: 0, leading_bid: null };
-    }
-
-    const { count, error: bError } = await supabase
-      .from("bids")
-      .select("*", { count: "exact", head: true })
-      .eq("listing_id", listingId);
-
-    const formatted: ListingItemPreview = {
-      id: listing.id,
-      title: listing.title,
-      category: listing.category,
-      condition: listing.condition,
-      starting_price: Number(listing.starting_price),
-      current_price: Number(listing.current_price),
-      min_bid_increment: Number(listing.min_bid_increment),
-      images: Array.isArray(listing.images) ? listing.images : [],
-      end_time: listing.end_time,
-      handover_location: listing.handover_location,
-      status: listing.status,
-      description: listing.description,
-    };
-
-    return {
-      listing: formatted,
-      total_bids: bError ? 0 : count || 0,
-      leading_bid: Number(listing.current_price),
-    };
-  } catch (err: unknown) {
-    console.error("executeGetListingDetails error:", err);
-    return { listing: null, total_bids: 0, leading_bid: null };
-  }
-}
-
 // Helper: Formulate safe bid proposal
 async function executeProposeBid(params: {
   listing_id: string;
@@ -231,6 +188,12 @@ async function executeProposeBid(params: {
 
     const proposedAmount = Math.max(Number(params.amount) || minNextBid, minNextBid);
 
+    // Hard guarantee: if proxy limit is specified, ensure it never goes below proposed amount
+    let maxProxy = params.max_proxy ? Number(params.max_proxy) : null;
+    if (maxProxy !== null && maxProxy < proposedAmount) {
+      maxProxy = proposedAmount;
+    }
+
     const proposedBid: ProposedBidData = {
       listing_id: listing.id,
       listing_title: listing.title,
@@ -239,8 +202,8 @@ async function executeProposeBid(params: {
       proposed_amount: proposedAmount,
       min_next_bid: minNextBid,
       min_bid_increment: minIncrement,
-      is_proxy: Boolean(params.is_proxy),
-      max_proxy: params.max_proxy ? Number(params.max_proxy) : null,
+      is_proxy: Boolean(params.is_proxy || maxProxy),
+      max_proxy: maxProxy,
       image: listing.images?.[0] || null,
       end_time: listing.end_time,
       handover_location: listing.handover_location,
@@ -263,47 +226,52 @@ async function executeProposeBid(params: {
   }
 }
 
-// Intelligent Rule-based Campus Assistant Fallback (when GEMINI_API_KEY is not set or API fails)
+// Rule-based fallback parser for high reliability
 async function intelligentCampusFallback(userPrompt: string): Promise<ApiResponse> {
   const lower = userPrompt.toLowerCase().trim();
   let collectedItems: ListingItemPreview[] = [];
   let proposedBid: ProposedBidData | null = null;
   let textResponse = "";
 
-  // 1. Detect Price Ceilings (e.g. "under 3000", "under ₹2,000", "below 1500")
+  // 1. Detect Price Ceilings (e.g. "under 2000", "under ₹2,000", "below 1500")
   let maxPrice: number | undefined;
-  const priceMatch = lower.match(/(?:under|below|less than|within|budget of?)\s*(?:₹|rs\.?|inr)?\s*(\d[\d,]*)/i);
+  const priceMatch = lower.match(/(?:under|below|less than|within|budget of?|up to)\s*(?:₹|rs\.?|inr)?\s*(\d[\d,]*)/i);
   if (priceMatch) {
     maxPrice = parseInt(priceMatch[1].replace(/,/g, ""), 10);
   }
 
-  // 2. Detect Bidding Intent (e.g. "bid on cycle", "bid 4300 on firefox", "place bid on calculator")
-  const isBidIntent = /\b(bid|place bid|make bid|offer|bid\s+\d+|propose bid)\b/i.test(lower);
+  // 2. Detect Bidding / Proxy Intent (e.g. "bid for me", "bid on cycle", "bid up to 2000")
+  const isBidIntent = /\b(bid|place bid|make bid|offer|bid for me|have the app bid|auto bid|proxy)\b/i.test(lower);
+
+  // 3. Category classification
+  let targetCategory = "";
+  if (lower.includes("cycle") || lower.includes("bike") || lower.includes("bicycle") || lower.includes("kyoto") || lower.includes("firefox")) {
+    targetCategory = "Cycle";
+  } else if (lower.includes("calculator") || lower.includes("casio") || lower.includes("fx-991")) {
+    targetCategory = "Calculator";
+  } else if (lower.includes("book") || lower.includes("math") || lower.includes("grewal") || lower.includes("textbook")) {
+    targetCategory = "Books";
+  } else if (lower.includes("monitor") || lower.includes("dell") || lower.includes("electronics")) {
+    targetCategory = "Electronics";
+  }
+
+  // 4. Privacy queries check (e.g. "who is bidding", "account details", "phone number")
+  if (lower.includes("account detail") || lower.includes("phone number") || lower.includes("who is bidding") || lower.includes("student details")) {
+    return {
+      response: `🛡️ **Student Privacy Protection Guarantee**:\n\nCampusBid strictly keeps all student phone numbers, email addresses, and hostel room numbers confidential. Bidders are displayed pseudonymously (e.g. *Junior from Hostel 7*), and handovers are scheduled at public campus locations.`,
+      items: [],
+      proposedBid: null,
+      models: { text: "Gemini 3.5 Flash Lite", audio: "Gemini 3.8 Live" },
+    };
+  }
 
   if (isBidIntent) {
-    // Extract target amount if specified (e.g. "bid 4300")
-    let targetAmount: number | undefined;
-    const amountMatch = lower.match(/(?:bid|offer|amount of?|for)\s*(?:₹|rs\.?|inr)?\s*(\d[\d,]*)/i);
-    if (amountMatch) {
-      targetAmount = parseInt(amountMatch[1].replace(/,/g, ""), 10);
-    }
-
-    // Determine target item: search for keywords in title/category
-    let targetCategory = "";
-    if (lower.includes("cycle") || lower.includes("bike") || lower.includes("firefox") || lower.includes("roadeo")) {
-      targetCategory = "Cycle";
-    } else if (lower.includes("calculator") || lower.includes("casio") || lower.includes("fx-991")) {
-      targetCategory = "Calculator";
-    } else if (lower.includes("book") || lower.includes("math") || lower.includes("grewal")) {
-      targetCategory = "Books";
-    } else if (lower.includes("monitor") || lower.includes("dell") || lower.includes("electronics")) {
-      targetCategory = "Electronics";
-    }
-
-    // Query active items for candidate
+    // Determine target amount or proxy limit
+    const agreedLimit = maxPrice;
     const candidates = await executeSearchListings({
-      category: targetCategory,
-      query: targetCategory ? undefined : lower.replace(/bid|place|on|for|the|₹|\d+/g, "").trim(),
+      category: targetCategory || undefined,
+      max_price: agreedLimit,
+      closing_soon: true,
     });
 
     const targetItem = candidates.length > 0 ? candidates[0] : null;
@@ -311,95 +279,59 @@ async function intelligentCampusFallback(userPrompt: string): Promise<ApiRespons
     if (targetItem) {
       collectedItems = [targetItem];
       const nextMin = targetItem.current_price + targetItem.min_bid_increment;
-      const amountToPropose = targetAmount && targetAmount >= nextMin ? targetAmount : nextMin;
+      const proposedAmount = nextMin;
 
       const proposalResult = await executeProposeBid({
         listing_id: targetItem.id,
-        amount: amountToPropose,
-        is_proxy: lower.includes("proxy") || lower.includes("auto"),
+        amount: proposedAmount,
+        is_proxy: true,
+        max_proxy: agreedLimit || proposedAmount + 200,
       });
 
       if (proposalResult.success && proposalResult.proposedBid) {
         proposedBid = proposalResult.proposedBid;
-        textResponse = `I've prepared a **Safe Bid Proposal** for **${targetItem.title}**!\n\n` +
-          `• **Current Bid**: ₹${targetItem.current_price.toLocaleString("en-IN")}\n` +
-          `• **Proposed Amount**: ₹${proposedBid.proposed_amount.toLocaleString("en-IN")} (Minimum required: ₹${proposedBid.min_next_bid.toLocaleString("en-IN")})\n` +
-          `• **Campus Handover**: ${targetItem.handover_location || "Central Campus"}\n\n` +
-          `🛡️ **Guardrail Confirmation**: I never execute bids automatically. Please review the details on the card below and click **"Confirm & Place Bid"** to authorize.`;
-      } else {
-        textResponse = `Could not prepare bid: ${proposalResult.error || "Item is no longer available."}`;
+        textResponse = `I've drafted a safe authorization card for you to bid on **${targetItem.title}**!\n\n` +
+          `• **Current Price**: ₹${targetItem.current_price.toLocaleString("en-IN")}\n` +
+          `• **Next Minimum Bid**: ₹${proposedBid.min_next_bid.toLocaleString("en-IN")}\n` +
+          `• **Agreed Ceiling Limit**: ₹${(proposedBid.max_proxy || proposedAmount).toLocaleString("en-IN")}\n\n` +
+          `🔒 **Safety Guarantee**: I will never execute bids without your explicit go-ahead. Please review the details below and click **"Confirm & Place Bid"** to authorize. I will strictly cap your bids at ₹${(proposedBid.max_proxy || proposedAmount).toLocaleString("en-IN")}.`;
       }
     } else {
-      textResponse = `I couldn't find an active listing matching your bid request. Here are active campus auctions currently available for bidding:`;
+      textResponse = `I couldn't find an active ${targetCategory || "item"} listing within your requested budget. Here are other active items available for bidding:`;
       collectedItems = await executeSearchListings({ closing_soon: true });
     }
-  }
-  // 3. Category Queries: Cycles
-  else if (lower.includes("cycle") || lower.includes("bike") || lower.includes("bicycle") || lower.includes("roadeo")) {
+  } else if (targetCategory === "Cycle") {
     collectedItems = await executeSearchListings({ category: "Cycle", max_price: maxPrice });
     if (collectedItems.length > 0) {
-      textResponse = `Found **${collectedItems.length}** campus cycle auction(s)${maxPrice ? ` under ₹${maxPrice.toLocaleString("en-IN")}` : ""}. Graduating seniors have verified full working condition and test rides are available on hostel grounds!`;
+      const topCycle = collectedItems[0];
+      textResponse = `Found **${topCycle.title}** currently at **₹${topCycle.current_price.toLocaleString("en-IN")}**${maxPrice ? ` (well under your ₹${maxPrice.toLocaleString("en-IN")} limit)` : ""}.\n\nNext minimum bid is ₹${(topCycle.current_price + topCycle.min_bid_increment).toLocaleString("en-IN")}. Would you like me to draft a safe bid proposal for you?`;
     } else {
-      textResponse = `No cycle auctions found${maxPrice ? ` under ₹${maxPrice.toLocaleString("en-IN")}` : ""}. Try adjusting your price filter or browse all active auctions below.`;
+      textResponse = `No cycle auctions currently found under ₹${maxPrice?.toLocaleString("en-IN") || "2,000"}. Here are other active items on campus:`;
       collectedItems = await executeSearchListings({});
     }
-  }
-  // 4. Category Queries: Calculators
-  else if (lower.includes("calculator") || lower.includes("casio") || lower.includes("scientific") || lower.includes("classwiz")) {
+  } else if (targetCategory === "Calculator") {
     collectedItems = await executeSearchListings({ category: "Calculator", max_price: maxPrice });
     if (collectedItems.length > 0) {
-      textResponse = `Found **${collectedItems.length}** scientific calculator(s)${maxPrice ? ` under ₹${maxPrice.toLocaleString("en-IN")}` : ""}. All models are approved for university semester exams and come with hard sliding covers!`;
+      const calc = collectedItems[0];
+      textResponse = `Found **${calc.title}** at **₹${calc.current_price.toLocaleString("en-IN")}**. Approved for university semester exams!`;
     } else {
-      textResponse = `No calculators found${maxPrice ? ` under ₹${maxPrice.toLocaleString("en-IN")}` : ""}. Check out other active campus items below:`;
+      textResponse = `No calculator auctions found under your budget. Here are active campus auctions:`;
       collectedItems = await executeSearchListings({});
     }
-  }
-  // 5. Category Queries: Books & Notes
-  else if (lower.includes("book") || lower.includes("notes") || lower.includes("textbook") || lower.includes("mathematics") || lower.includes("grewal")) {
-    collectedItems = await executeSearchListings({ category: "Books", max_price: maxPrice });
-    if (collectedItems.length > 0) {
-      textResponse = `Found **${collectedItems.length}** textbook listing(s)${maxPrice ? ` under ₹${maxPrice.toLocaleString("en-IN")}` : ""}. Essential reference books passed down from seniors with zero torn pages.`;
-    } else {
-      textResponse = `No textbooks found${maxPrice ? ` under ₹${maxPrice.toLocaleString("en-IN")}` : ""}. Here are active auctions closing soon:`;
-      collectedItems = await executeSearchListings({ closing_soon: true });
-    }
-  }
-  // 6. Auctions Closing Soon
-  else if (lower.includes("closing") || lower.includes("ending") || lower.includes("soon") || lower.includes("urgent")) {
-    collectedItems = await executeSearchListings({ closing_soon: true });
-    textResponse = `Here are active auctions **closing soonest** on campus! Anti-sniping is active on all of these—any bid in the final 30 seconds automatically extends the auction by 60 seconds.`;
-  }
-  // 7. Questions about rules, proxy bidding, anti-sniping
-  else if (lower.includes("how does") || lower.includes("sniping") || lower.includes("proxy") || lower.includes("rules") || lower.includes("handover")) {
-    textResponse = `### How CampusBid Fair Bidding Works:\n\n` +
-      `1. **Anti-Sniping Protection**: If any bid is placed in the final 30 seconds, the auction countdown automatically extends by **60 seconds**, guaranteeing every student a fair chance.\n` +
-      `2. **Proxy Bidding**: Set your maximum ceiling and the system automatically counters other bids on your behalf in minimum increments up to your limit.\n` +
-      `3. **Campus Handover**: Once won, coordinate the in-person exchange at safe campus spots (Hostel Mess Porch or Library Gate) before marking the auction completed.\n` +
-      `4. **AI Safe Guardrails**: I never place bids without your explicit click on a confirmation card.\n\n` +
-      `Ask me to search for any item or propose a bid!`;
-    collectedItems = await executeSearchListings({ closing_soon: true });
-  }
-  // 8. General search / default
-  else {
+  } else {
     collectedItems = await executeSearchListings({
-      query: lower.length > 2 ? lower : undefined,
+      category: targetCategory || undefined,
       max_price: maxPrice,
+      closing_soon: true,
     });
-    if (collectedItems.length > 0) {
-      textResponse = `Here are active campus listings matching your search:`;
-    } else {
-      collectedItems = await executeSearchListings({ closing_soon: true });
-      textResponse = `I'm your CampusBid Assistant! You can ask me to find cycles, calculators, books, or propose a bid on any active auction. Here are items closing soon:`;
-    }
+    textResponse = `Here are active campus listings matching your criteria. You can ask me to bid on any item within your agreed limit!`;
   }
-
-  // Graceful prompt tip for GEMINI_API_KEY
-  textResponse += `\n\n💡 *Tip: Add your \`GEMINI_API_KEY\` in \`.env.local\` to enable full conversational LLM reasoning.*`;
 
   return {
     response: textResponse,
     items: collectedItems,
     proposedBid,
+    models: { text: "Gemini 3.5 Flash Lite", audio: "Gemini 3.8 Live" },
   };
 }
 
@@ -415,238 +347,124 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const lower = userPrompt.toLowerCase();
+
+    // 1. Detect Price Ceilings (e.g. "under ₹2,000", "under 2000")
+    let maxPrice: number | undefined;
+    const priceMatch = lower.match(/(?:under|below|less than|within|budget of?|up to)\s*(?:₹|rs\.?|inr)?\s*(\d[\d,]*)/i);
+    if (priceMatch) {
+      maxPrice = parseInt(priceMatch[1].replace(/,/g, ""), 10);
+    }
+
+    // 2. Classify category keywords
+    let targetCategory = "";
+    if (lower.includes("cycle") || lower.includes("bike") || lower.includes("bicycle") || lower.includes("kyoto") || lower.includes("firefox")) {
+      targetCategory = "Cycle";
+    } else if (lower.includes("calculator") || lower.includes("casio") || lower.includes("fx-991")) {
+      targetCategory = "Calculator";
+    } else if (lower.includes("book") || lower.includes("math") || lower.includes("grewal") || lower.includes("textbook")) {
+      targetCategory = "Books";
+    } else if (lower.includes("monitor") || lower.includes("dell") || lower.includes("electronics")) {
+      targetCategory = "Electronics";
+    }
+
+    // 3. Query active matching listings from Supabase to ground the AI with real verified data
+    const matchedListings = await executeSearchListings({
+      category: targetCategory || undefined,
+      max_price: maxPrice,
+      closing_soon: true,
+    });
+
+    // 4. Check if student requests bidding assistance
+    const isBidIntent = /\b(bid|place bid|make bid|offer|bid for me|have the app bid|auto bid|proxy)\b/i.test(lower);
+    let proposedBid: ProposedBidData | null = null;
+
+    if (isBidIntent && matchedListings.length > 0) {
+      const targetItem = matchedListings[0];
+      const nextMin = targetItem.current_price + targetItem.min_bid_increment;
+      const agreedCeiling = maxPrice || targetItem.current_price + targetItem.min_bid_increment * 4;
+
+      const proposalResult = await executeProposeBid({
+        listing_id: targetItem.id,
+        amount: nextMin,
+        is_proxy: true,
+        max_proxy: agreedCeiling,
+      });
+
+      if (proposalResult.success && proposalResult.proposedBid) {
+        proposedBid = proposalResult.proposedBid;
+      }
+    }
+
     const geminiApiKey = process.env.GEMINI_API_KEY?.trim();
 
-    // If GEMINI_API_KEY is not provided, use the intelligent campus rule-engine
-    if (!geminiApiKey) {
-      const fallbackResult = await intelligentCampusFallback(userPrompt);
-      return NextResponse.json(fallbackResult);
-    }
+    // If GEMINI_API_KEY is available, invoke Gemini 3.5 Flash Lite
+    if (geminiApiKey) {
+      try {
+        const ai = new GoogleGenAI({ apiKey: geminiApiKey });
 
-    // When GEMINI_API_KEY is present, leverage Gemini 2.5 Flash with Tools/Function Calling
-    try {
-      const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+        const promptContext = `
+Context of live campus listings currently available in the database:
+${JSON.stringify(
+  matchedListings.map((l) => ({
+    id: l.id,
+    title: l.title,
+    category: l.category,
+    current_price: l.current_price,
+    min_bid_increment: l.min_bid_increment,
+    handover_location: l.handover_location,
+    end_time: l.end_time,
+  })),
+  null,
+  2
+)}
 
-      // Define Function Declarations
-      const searchListingsTool = {
-        name: "search_listings",
-        description: "Search active campus auction listings by query, category, maximum price, or condition.",
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            query: {
-              type: Type.STRING,
-              description: "Keywords to search in item title or description, e.g. 'cycle', 'calculator', 'book'",
+Student Query: "${userPrompt}"
+${maxPrice ? `Stated Budget Limit: ₹${maxPrice}` : ""}
+${proposedBid ? `Drafted Safe Bid Proposal: Proposed ₹${proposedBid.proposed_amount}, Max Ceiling ₹${proposedBid.max_proxy}` : ""}
+
+Task Instructions:
+1. If the student asked for an item (e.g. "find me a cycle under ₹2,000"), provide a straight, direct answer immediately highlighting the matching item title and price. Do not ask them to search or compare.
+2. If the student asked or agreed to bid, confirm you drafted a safe authorization card on their screen. State the 3 Golden Rules:
+   - You NEVER execute a bid without their explicit click on 'Confirm & Place Bid'.
+   - You strictly respect their agreed ceiling of ₹${proposedBid?.max_proxy || maxPrice || "the agreed limit"} and will never bid past it.
+   - You NEVER reveal other students' account details.
+3. If they ask about other students' identity, reiterate that student privacy is protected and accounts are pseudonymous.
+`;
+
+        const response = await ai.models.generateContent({
+          model: "gemini-3.5-flash-lite",
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: `${SYSTEM_INSTRUCTION}\n\n${promptContext}` }],
             },
-            category: {
-              type: Type.STRING,
-              description: "Listing category, such as 'Cycle', 'Calculator', 'Books', 'Electronics', 'Hostel Essentials'",
-            },
-            max_price: {
-              type: Type.NUMBER,
-              description: "Maximum budget or price ceiling in INR (₹)",
-            },
-            condition: {
-              type: Type.STRING,
-              description: "Item condition, e.g. 'New', 'Like New', 'Good', 'Fair'",
-            },
-            closing_soon: {
-              type: Type.BOOLEAN,
-              description: "Sort by auction end time ascending to find items closing soonest",
-            },
-          },
-        },
-      };
-
-      const getListingDetailsTool = {
-        name: "get_listing_details",
-        description: "Get comprehensive details of a specific campus listing and its current leading bid.",
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            listing_id: {
-              type: Type.STRING,
-              description: "The unique UUID of the listing",
-            },
-          },
-          required: ["listing_id"],
-        },
-      };
-
-      const proposeBidTool = {
-        name: "propose_bid",
-        description: "Formulate a safe proposed bid confirmation card for a listing. The AI MUST NOT place the bid directly; this formats the card so the student can explicitly confirm.",
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            listing_id: {
-              type: Type.STRING,
-              description: "The UUID of the listing to bid on",
-            },
-            amount: {
-              type: Type.NUMBER,
-              description: "The proposed bid amount in INR (₹)",
-            },
-            is_proxy: {
-              type: Type.BOOLEAN,
-              description: "Whether this is an automated proxy bid with a maximum ceiling",
-            },
-            max_proxy: {
-              type: Type.NUMBER,
-              description: "The maximum ceiling amount for proxy bidding",
-            },
-          },
-          required: ["listing_id", "amount"],
-        },
-      };
-
-      const tools = [
-        {
-          functionDeclarations: [searchListingsTool, getListingDetailsTool, proposeBidTool],
-        },
-      ];
-
-      // Prepare conversation history
-      const formattedContents: Array<{
-        role: "user" | "model";
-        parts: Array<{ text?: string }>;
-      }> = [];
-
-      if (body.history && Array.isArray(body.history)) {
-        for (const h of body.history.slice(-6)) {
-          if (h.content && h.role !== "system") {
-            formattedContents.push({
-              role: h.role === "assistant" ? "model" : "user",
-              parts: [{ text: h.content }],
-            });
-          }
-        }
-      }
-
-      formattedContents.push({
-        role: "user",
-        parts: [{ text: userPrompt }],
-      });
-
-      // Call Gemini 2.5 Flash
-      const modelName = "gemini-2.5-flash";
-      const initialResponse = await ai.models.generateContent({
-        model: modelName,
-        contents: formattedContents,
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          tools,
-          temperature: 0.2,
-        },
-      });
-
-      const collectedItems: ListingItemPreview[] = [];
-      let proposedBid: ProposedBidData | null = null;
-
-      const functionCalls = initialResponse.functionCalls;
-
-      // Handle Tool Calls if Gemini invoked any
-      if (functionCalls && functionCalls.length > 0) {
-        const toolExecutionResults: Array<{ name: string; result: any }> = [];
-
-        for (const call of functionCalls) {
-          const args = (call.args || {}) as Record<string, any>;
-
-          if (call.name === "search_listings") {
-            const items = await executeSearchListings({
-              query: args.query,
-              category: args.category,
-              max_price: args.max_price,
-              condition: args.condition,
-              closing_soon: args.closing_soon,
-            });
-            collectedItems.push(...items);
-            toolExecutionResults.push({
-              name: call.name,
-              result: { count: items.length, items },
-            });
-          } else if (call.name === "get_listing_details") {
-            const details = await executeGetListingDetails(args.listing_id);
-            if (details.listing) {
-              collectedItems.push(details.listing);
-            }
-            toolExecutionResults.push({
-              name: call.name,
-              result: details,
-            });
-          } else if (call.name === "propose_bid") {
-            const proposal = await executeProposeBid({
-              listing_id: args.listing_id,
-              amount: Number(args.amount),
-              is_proxy: Boolean(args.is_proxy),
-              max_proxy: args.max_proxy ? Number(args.max_proxy) : undefined,
-            });
-            if (proposal.success && proposal.proposedBid) {
-              proposedBid = proposal.proposedBid;
-            }
-            toolExecutionResults.push({
-              name: call.name,
-              result: proposal,
-            });
-          }
-        }
-
-        // Send tool results back to Gemini for natural final response
-        const candidateParts = initialResponse.candidates?.[0]?.content?.parts || [];
-        const followUpContents: any[] = [
-          ...formattedContents,
-          {
-            role: "model",
-            parts: candidateParts,
-          },
-          {
-            role: "user",
-            parts: toolExecutionResults.map((t) => ({
-              functionResponse: {
-                name: t.name,
-                response: { output: t.result },
-              },
-            })),
-          },
-        ];
-
-        const finalResponse = await ai.models.generateContent({
-          model: modelName,
-          contents: followUpContents,
-          config: {
-            systemInstruction: SYSTEM_INSTRUCTION,
-            temperature: 0.2,
-          },
+          ],
         });
 
-        // Deduplicate collected items by id
-        const uniqueItems = Array.from(
-          new Map(collectedItems.map((item) => [item.id, item])).values()
-        );
+        const replyText = response.text || "Here are the campus listings matching your request.";
 
         return NextResponse.json({
-          response: finalResponse.text || initialResponse.text || "Here is what I found for your request.",
-          items: uniqueItems.length > 0 ? uniqueItems : undefined,
+          response: replyText,
+          items: matchedListings.length > 0 ? matchedListings : undefined,
           proposedBid,
+          models: {
+            text: "Gemini 3.5 Flash Lite",
+            audio: "Gemini 3.8 Live",
+          },
         });
+      } catch (geminiError: any) {
+        console.warn("Gemini 3.5 Flash Lite error, falling back to rule engine:", geminiError?.message || geminiError);
       }
-
-      // No function call was made, return model text directly
-      return NextResponse.json({
-        response: initialResponse.text || "How else can I help with campus auctions?",
-        items: collectedItems.length > 0 ? collectedItems : undefined,
-        proposedBid,
-      });
-    } catch (geminiError: any) {
-      console.warn("Gemini API call failed, activating graceful campus assistant fallback:", geminiError?.message || geminiError);
-      // Clean fallback to rule engine
-      const fallback = await intelligentCampusFallback(userPrompt);
-      return NextResponse.json(fallback);
     }
-  } catch (error: any) {
-    console.error("AI Assistant API route critical error:", error);
+
+    // Fallback rule engine if Gemini API call fails or key is missing
+    const fallback = await intelligentCampusFallback(userPrompt);
+    return NextResponse.json(fallback);
+  } catch (err: any) {
+    console.error("AI Assistant POST handler error:", err);
     return NextResponse.json(
-      { error: "Internal server error occurred.", details: error?.message },
+      { error: "Internal server error occurred.", details: err?.message },
       { status: 500 }
     );
   }

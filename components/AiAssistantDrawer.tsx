@@ -49,10 +49,10 @@ interface ChatMessage {
 }
 
 const QUICK_PROMPTS = [
-  { label: "Find cycles under ₹3,000", query: "Find cycles under ₹3,000", icon: Bike },
+  { label: "Find me a cycle under ₹2,000", query: "find me a cycle under 2000", icon: Bike },
+  { label: "Have app bid for me on cycle up to ₹2,000", query: "have the app bid for me on the cycle up to 2000", icon: Gavel },
   { label: "Scientific calculators for exams", query: "Show scientific calculators approved for exams", icon: Calculator },
   { label: "Engineering Mathematics books", query: "Find Engineering Mathematics textbooks", icon: BookOpen },
-  { label: "How does anti-sniping work?", query: "How does the anti-sniping 60s extension work?", icon: Zap },
   { label: "Strict budget & safety guardrails", query: "What are your student safety and budget guardrails?", icon: Shield },
 ];
 
@@ -109,6 +109,7 @@ export function AiAssistantDrawer({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isListening, setIsListening] = useState(false);
 
   // Active Bid Card State
   const [activeBidInputs, setActiveBidInputs] = useState<
@@ -507,6 +508,15 @@ export function AiAssistantDrawer({
                         Enhance your bidding <br />
                         with <span className="bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent font-extrabold">creative tools</span>
                       </h3>
+                      <div className="flex items-center justify-center gap-2 mt-2.5">
+                        <span className="text-[10px] font-bold bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-full border border-slate-200">
+                          Text: Gemini 3.5 Flash Lite
+                        </span>
+                        <span className="text-[10px] font-bold bg-red-50 text-red-700 px-2.5 py-0.5 rounded-full border border-red-200 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
+                          Audio: Gemini 3.8 Live
+                        </span>
+                      </div>
                       <p className="text-xs text-slate-500 mt-1">
                         Find cycles, calculators, books, and place safe confirmed bids.
                       </p>
@@ -766,18 +776,50 @@ export function AiAssistantDrawer({
                   />
 
                   {/* Circular Glowing Audio/Send Button (Matching reference) */}
-                  <button
-                    type="submit"
-                    disabled={!input.trim() || isLoading}
-                    className="w-9 h-9 rounded-full bg-slate-950 text-white flex items-center justify-center shrink-0 ring-2 ring-purple-500/40 hover:scale-105 active:scale-95 transition-all shadow-md disabled:opacity-40 cursor-pointer"
-                    aria-label="Send Prompt"
-                  >
-                    {input.trim() ? (
+                  {input.trim() ? (
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="w-9 h-9 rounded-full bg-slate-950 text-white flex items-center justify-center shrink-0 ring-2 ring-red-500/40 hover:scale-105 active:scale-95 transition-all shadow-md cursor-pointer"
+                      aria-label="Send Prompt"
+                    >
                       <Send className="w-3.5 h-3.5 text-white" />
-                    ) : (
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (typeof window !== "undefined") {
+                          const SpeechRecognition =
+                            (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+                          if (SpeechRecognition) {
+                            const rec = new SpeechRecognition();
+                            rec.lang = "en-IN";
+                            rec.onstart = () => setIsListening(true);
+                            rec.onresult = (e: any) => {
+                              const transcript = e.results[0][0].transcript;
+                              setInput(transcript);
+                              sendMessage(transcript);
+                            };
+                            rec.onend = () => setIsListening(false);
+                            rec.onerror = () => setIsListening(false);
+                            rec.start();
+                          } else {
+                            alert("Speech recognition not supported in this browser.");
+                          }
+                        }
+                      }}
+                      className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ring-2 transition-all shadow-md cursor-pointer ${
+                        isListening
+                          ? "bg-red-600 text-white ring-red-400 animate-pulse"
+                          : "bg-slate-950 text-white ring-purple-500/40 hover:scale-105"
+                      }`}
+                      aria-label="Gemini 3.8 Live Voice"
+                      title="Speak with Gemini 3.8 Live"
+                    >
                       <AudioLines className="w-4 h-4 text-purple-300" />
-                    )}
-                  </button>
+                    </button>
+                  )}
                 </form>
               </div>
 

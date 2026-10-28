@@ -26,6 +26,7 @@ import { CreateListingModal } from "@/components/CreateListingModal";
 import { WishlistModal } from "@/components/WishlistModal";
 import { NotificationDrawer } from "@/components/NotificationDrawer";
 import { AiAssistantDrawer } from "@/components/AiAssistantDrawer";
+import { AiAssistantTab } from "@/components/AiAssistantTab";
 import { SellerDashboard } from "@/components/SellerDashboard";
 
 export default function HomePage() {
@@ -53,7 +54,18 @@ export default function HomePage() {
     location: "",
   });
   const [sortBy, setSortBy] = useState<string>("closing_soon");
-  const [activeTab, setActiveTab] = useState<"auctions" | "seller">("auctions");
+  const [activeTab, setActiveTab] = useState<"auctions" | "seller" | "ai">("auctions");
+
+  // Read URL tab parameter on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab");
+      if (tabParam === "ai" || tabParam === "seller" || tabParam === "auctions") {
+        setActiveTab(tabParam as any);
+      }
+    }
+  }, []);
 
   // Fetch listings from Supabase
   const fetchListings = async () => {
@@ -294,6 +306,12 @@ export default function HomePage() {
             onOpenCreateListing={() => setIsCreateModalOpen(true)}
             onOpenDetailModal={(id) => setSelectedListingId(id)}
             onOpenAiDrawer={() => setIsAiDrawerOpen(true)}
+          />
+        </main>
+      ) : activeTab === "ai" ? (
+        <main className="flex-1 w-full">
+          <AiAssistantTab
+            onSelectListing={(id) => setSelectedListingId(id)}
           />
         </main>
       ) : (
