@@ -591,8 +591,8 @@ export function AiAssistantTab({ onSelectListing }: AiAssistantTabProps) {
                   {msg.content}
                 </div>
 
-                {/* Embedded Listing Preview Cards (Straight answer item display) */}
-                {msg.items && msg.items.length > 0 && (
+                {/* Embedded Listing Preview Cards (Straight answer item display, shown when no bid proposed) */}
+                {!msg.proposedBid && msg.items && msg.items.length > 0 && (
                   <div className="mt-4 pt-3 border-t border-slate-700/70 grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {msg.items.map((item) => (
                       <div
@@ -931,7 +931,8 @@ export function AiAssistantTab({ onSelectListing }: AiAssistantTabProps) {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="e.g. Find me a cycle under ₹2,000, or have the app bid for me..."
-              className="flex-1 bg-transparent border-0 text-sm text-white placeholder:text-slate-400 focus:outline-hidden focus:ring-0 px-2 py-1.5 font-medium"
+              className="flex-1 bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-sm text-white placeholder:text-slate-400 px-2 py-1.5 font-medium"
+              style={{ outline: "none", border: "none", boxShadow: "none" }}
             />
 
             {/* Send Button */}

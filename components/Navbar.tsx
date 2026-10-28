@@ -101,29 +101,6 @@ export function Navbar({
                 <LayoutDashboard className="w-3.5 h-3.5" />
                 <span>Seller Dashboard</span>
               </Link>
-              <Link
-                href="/?tab=ai"
-                onClick={(e) => {
-                  if (onTabChange) {
-                    e.preventDefault();
-                    onTabChange("ai");
-                  }
-                }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  activeTab === "ai"
-                    ? "bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-xs"
-                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
-                }`}
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                <span>AI Assistant</span>
-                <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 ${
-                  activeTab === "ai" ? "bg-white/20 text-white" : "bg-red-50 text-red-600 border border-red-200"
-                }`}>
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></span>
-                  Live Audio
-                </span>
-              </Link>
             </nav>
           </div>
 

@@ -83,12 +83,30 @@ The assistant plays by the same rules as everyone else:
    - Never disclose phone numbers, email addresses, student IDs, or hostel room numbers.
    - Bidders are pseudonymous (e.g. "Bidder #34", "Junior from Hostel 7").
    - Handovers occur safely in designated campus areas (e.g. Hostel Mess Porch, Library Gates).
-4. STRAIGHT, DIRECT ANSWERS:
+4. STRAIGHT, DIRECT ANSWERS & SINGLE ITEM PRECISION:
+   - When a user asks about or bids on a specific item (e.g. "Hero Kyoto cycle"), focus exclusively on that item. Do NOT list unrelated items.
    - Give straight, clear answers immediately highlighting the matching item and price in Indian Rupees (₹).
-   - Never force the student to search or compare on their own.
+5. MANDATORY BOLD FORMATTING FOR ASKING QUESTIONS:
+   - Whenever you ask the student a question (e.g. asking if they want to set up an automated proxy bid, place a bid, or proceed with an authorization), you MUST format that entire asking question in bold text:
+     Example: **Would you like me to set up an automated proxy bid for you up to your ₹2,000 limit?**
 `;
 
-// Helper: Query listings from Supabase with robust category/price filtering
+// Helper: Ensure asking questions are bold
+function ensureAskingTextBold(text: string): string {
+  // Matches questions asking for user go-ahead or confirmation
+  return text.replace(
+    /(?:^|[.!?\n]\s*)([A-Z][^.!?\n]*\b(?:would you like me to|would you like|do you want me to|do you want|shall i|should i)\b[^.!?\n]*\?)/g,
+    (full, question) => {
+      const trimmed = question.trim();
+      if (trimmed.startsWith("**") && trimmed.endsWith("**")) {
+        return full;
+      }
+      return full.replace(trimmed, `**${trimmed}**`);
+    }
+  );
+}
+
+// Helper: Query listings from Supabase
 async function executeSearchListings(params: {
   query?: string;
   category?: string;
@@ -151,6 +169,45 @@ async function executeSearchListings(params: {
   }
 }
 
+// Helper: Extract specific item when user quotes or mentions a title
+function findSpecificItem(userPrompt: string, listings: ListingItemPreview[]): ListingItemPreview | null {
+  const lower = userPrompt.toLowerCase();
+
+  // 1. Quoted title fragment
+  const quoteMatch = userPrompt.match(/["']([^"']+)["']/);
+  if (quoteMatch) {
+    const quoted = quoteMatch[1].toLowerCase().trim();
+    const found = listings.find(
+      (l) => l.title.toLowerCase().includes(quoted) || quoted.includes(l.title.toLowerCase().slice(0, 15))
+    );
+    if (found) return found;
+  }
+
+  // 2. Specific keywords in title
+  if (lower.includes("kyoto") || lower.includes("hero kyoto")) {
+    const found = listings.find((l) => l.title.toLowerCase().includes("kyoto"));
+    if (found) return found;
+  }
+  if (lower.includes("firefox")) {
+    const found = listings.find((l) => l.title.toLowerCase().includes("firefox"));
+    if (found) return found;
+  }
+  if (lower.includes("casio") || lower.includes("fx-991")) {
+    const found = listings.find((l) => l.title.toLowerCase().includes("casio"));
+    if (found) return found;
+  }
+  if (lower.includes("grewal") || lower.includes("engineering mathematics")) {
+    const found = listings.find((l) => l.title.toLowerCase().includes("grewal"));
+    if (found) return found;
+  }
+  if (lower.includes("monitor") || lower.includes("dell")) {
+    const found = listings.find((l) => l.title.toLowerCase().includes("monitor"));
+    if (found) return found;
+  }
+
+  return null;
+}
+
 // Helper: Formulate safe bid proposal
 async function executeProposeBid(params: {
   listing_id: string;
@@ -188,7 +245,6 @@ async function executeProposeBid(params: {
 
     const proposedAmount = Math.max(Number(params.amount) || minNextBid, minNextBid);
 
-    // Hard guarantee: if proxy limit is specified, ensure it never goes below proposed amount
     let maxProxy = params.max_proxy ? Number(params.max_proxy) : null;
     if (maxProxy !== null && maxProxy < proposedAmount) {
       maxProxy = proposedAmount;
@@ -207,7 +263,6 @@ async function executeProposeBid(params: {
       image: listing.images?.[0] || null,
       end_time: listing.end_time,
       handover_location: listing.handover_location,
-      // Compatibility aliases
       listingId: listing.id,
       itemTitle: listing.title,
       currentPrice: currentPrice,
@@ -233,15 +288,15 @@ async function intelligentCampusFallback(userPrompt: string): Promise<ApiRespons
   let proposedBid: ProposedBidData | null = null;
   let textResponse = "";
 
-  // 1. Detect Price Ceilings (e.g. "under 2000", "under ₹2,000", "below 1500")
+  // 1. Detect Price Ceilings
   let maxPrice: number | undefined;
   const priceMatch = lower.match(/(?:under|below|less than|within|budget of?|up to)\s*(?:₹|rs\.?|inr)?\s*(\d[\d,]*)/i);
   if (priceMatch) {
     maxPrice = parseInt(priceMatch[1].replace(/,/g, ""), 10);
   }
 
-  // 2. Detect Bidding / Proxy Intent (e.g. "bid for me", "bid on cycle", "bid up to 2000")
-  const isBidIntent = /\b(bid|place bid|make bid|offer|bid for me|have the app bid|auto bid|proxy)\b/i.test(lower);
+  // 2. Detect Bidding / Proxy Intent
+  const isBidIntent = /\b(bid|place bid|make bid|offer|bid for me|have the app bid|auto bid|proxy|propose a bid)\b/i.test(lower);
 
   // 3. Category classification
   let targetCategory = "";
@@ -255,7 +310,7 @@ async function intelligentCampusFallback(userPrompt: string): Promise<ApiRespons
     targetCategory = "Electronics";
   }
 
-  // 4. Privacy queries check (e.g. "who is bidding", "account details", "phone number")
+  // 4. Privacy queries check
   if (lower.includes("account detail") || lower.includes("phone number") || lower.includes("who is bidding") || lower.includes("student details")) {
     return {
       response: `🛡️ **Student Privacy Protection Guarantee**:\n\nCampusBid strictly keeps all student phone numbers, email addresses, and hostel room numbers confidential. Bidders are displayed pseudonymously (e.g. *Junior from Hostel 7*), and handovers are scheduled at public campus locations.`,
@@ -265,16 +320,17 @@ async function intelligentCampusFallback(userPrompt: string): Promise<ApiRespons
     };
   }
 
-  if (isBidIntent) {
-    // Determine target amount or proxy limit
-    const agreedLimit = maxPrice;
-    const candidates = await executeSearchListings({
-      category: targetCategory || undefined,
-      max_price: agreedLimit,
-      closing_soon: true,
-    });
+  const allCategoryListings = await executeSearchListings({
+    category: targetCategory || undefined,
+    max_price: maxPrice,
+    closing_soon: true,
+  });
 
-    const targetItem = candidates.length > 0 ? candidates[0] : null;
+  const exactItem = findSpecificItem(userPrompt, allCategoryListings);
+
+  if (isBidIntent) {
+    const agreedLimit = maxPrice;
+    const targetItem = exactItem || (allCategoryListings.length > 0 ? allCategoryListings[0] : null);
 
     if (targetItem) {
       collectedItems = [targetItem];
@@ -290,45 +346,31 @@ async function intelligentCampusFallback(userPrompt: string): Promise<ApiRespons
 
       if (proposalResult.success && proposalResult.proposedBid) {
         proposedBid = proposalResult.proposedBid;
-        textResponse = `I've drafted a safe authorization card for you to bid on **${targetItem.title}**!\n\n` +
-          `• **Current Price**: ₹${targetItem.current_price.toLocaleString("en-IN")}\n` +
-          `• **Next Minimum Bid**: ₹${proposedBid.min_next_bid.toLocaleString("en-IN")}\n` +
-          `• **Agreed Ceiling Limit**: ₹${(proposedBid.max_proxy || proposedAmount).toLocaleString("en-IN")}\n\n` +
-          `🔒 **Safety Guarantee**: I will never execute bids without your explicit go-ahead. Please review the details below and click **"Confirm & Place Bid"** to authorize. I will strictly cap your bids at ₹${(proposedBid.max_proxy || proposedAmount).toLocaleString("en-IN")}.`;
+        textResponse = `I've drafted a safe authorization card on your screen for **${targetItem.title}** at ₹${proposedBid.proposed_amount.toLocaleString("en-IN")}${proposedBid.max_proxy ? ` (with a max ceiling of ₹${proposedBid.max_proxy.toLocaleString("en-IN")})` : ""}.\n\nPlease click **'Confirm & Place Bid'** on screen to authorize it.\n\nAs your CampusBid AI assistant, I operate strictly under our core rules:\n1. **Never acting without your go-ahead**: I never execute a bid directly. You must manually click the confirmation button.\n2. **Never going past your agreed limit**: Your ceiling is strictly locked at ₹${(proposedBid.max_proxy || proposedAmount).toLocaleString("en-IN")}. I guarantee the system will never bid a single rupee beyond your limit.\n3. **Never revealing student account details**: All student privacy is fully protected, and identities remain completely pseudonymous.`;
       }
     } else {
       textResponse = `I couldn't find an active ${targetCategory || "item"} listing within your requested budget. Here are other active items available for bidding:`;
       collectedItems = await executeSearchListings({ closing_soon: true });
     }
+  } else if (exactItem) {
+    collectedItems = [exactItem];
+    textResponse = `Found **${exactItem.title}** currently at **₹${exactItem.current_price.toLocaleString("en-IN")}**.\n\n**Would you like me to set up an automated proxy bid for you up to your limit?**`;
   } else if (targetCategory === "Cycle") {
-    collectedItems = await executeSearchListings({ category: "Cycle", max_price: maxPrice });
+    collectedItems = allCategoryListings;
     if (collectedItems.length > 0) {
       const topCycle = collectedItems[0];
-      textResponse = `Found **${topCycle.title}** currently at **₹${topCycle.current_price.toLocaleString("en-IN")}**${maxPrice ? ` (well under your ₹${maxPrice.toLocaleString("en-IN")} limit)` : ""}.\n\nNext minimum bid is ₹${(topCycle.current_price + topCycle.min_bid_increment).toLocaleString("en-IN")}. Would you like me to draft a safe bid proposal for you?`;
+      textResponse = `Found **${topCycle.title}** currently at **₹${topCycle.current_price.toLocaleString("en-IN")}**${maxPrice ? ` (well under your ₹${maxPrice.toLocaleString("en-IN")} limit)` : ""}.\n\nNext minimum bid is ₹${(topCycle.current_price + topCycle.min_bid_increment).toLocaleString("en-IN")}. **Would you like me to set up an automated proxy bid for you up to your limit?**`;
     } else {
       textResponse = `No cycle auctions currently found under ₹${maxPrice?.toLocaleString("en-IN") || "2,000"}. Here are other active items on campus:`;
       collectedItems = await executeSearchListings({});
     }
-  } else if (targetCategory === "Calculator") {
-    collectedItems = await executeSearchListings({ category: "Calculator", max_price: maxPrice });
-    if (collectedItems.length > 0) {
-      const calc = collectedItems[0];
-      textResponse = `Found **${calc.title}** at **₹${calc.current_price.toLocaleString("en-IN")}**. Approved for university semester exams!`;
-    } else {
-      textResponse = `No calculator auctions found under your budget. Here are active campus auctions:`;
-      collectedItems = await executeSearchListings({});
-    }
   } else {
-    collectedItems = await executeSearchListings({
-      category: targetCategory || undefined,
-      max_price: maxPrice,
-      closing_soon: true,
-    });
-    textResponse = `Here are active campus listings matching your criteria. You can ask me to bid on any item within your agreed limit!`;
+    collectedItems = allCategoryListings;
+    textResponse = `Here are active campus listings matching your criteria. **Would you like me to set up an automated proxy bid for you?**`;
   }
 
   return {
-    response: textResponse,
+    response: ensureAskingTextBold(textResponse),
     items: collectedItems,
     proposedBid,
     models: { text: "Gemini 3.5 Flash Lite", audio: "Gemini 3.8 Live" },
@@ -349,7 +391,7 @@ export async function POST(req: NextRequest) {
 
     const lower = userPrompt.toLowerCase();
 
-    // 1. Detect Price Ceilings (e.g. "under ₹2,000", "under 2000")
+    // 1. Detect Price Ceilings
     let maxPrice: number | undefined;
     const priceMatch = lower.match(/(?:under|below|less than|within|budget of?|up to)\s*(?:₹|rs\.?|inr)?\s*(\d[\d,]*)/i);
     if (priceMatch) {
@@ -368,19 +410,27 @@ export async function POST(req: NextRequest) {
       targetCategory = "Electronics";
     }
 
-    // 3. Query active matching listings from Supabase to ground the AI with real verified data
-    const matchedListings = await executeSearchListings({
+    // 3. Query active matching listings from Supabase
+    let matchedListings = await executeSearchListings({
       category: targetCategory || undefined,
       max_price: maxPrice,
       closing_soon: true,
     });
 
+    // Check if user specifically requested an exact item by title or quote
+    const exactItem = findSpecificItem(userPrompt, matchedListings);
+    if (exactItem) {
+      matchedListings = [exactItem];
+    }
+
     // 4. Check if student requests bidding assistance
-    const isBidIntent = /\b(bid|place bid|make bid|offer|bid for me|have the app bid|auto bid|proxy)\b/i.test(lower);
+    const isBidIntent = /\b(bid|place bid|make bid|offer|bid for me|have the app bid|auto bid|proxy|propose a bid)\b/i.test(lower);
     let proposedBid: ProposedBidData | null = null;
 
     if (isBidIntent && matchedListings.length > 0) {
-      const targetItem = matchedListings[0];
+      const targetItem = exactItem || matchedListings[0];
+      matchedListings = [targetItem]; // Keep ONLY the 1 item being bid on!
+
       const nextMin = targetItem.current_price + targetItem.min_bid_increment;
       const agreedCeiling = maxPrice || targetItem.current_price + targetItem.min_bid_increment * 4;
 
@@ -398,7 +448,6 @@ export async function POST(req: NextRequest) {
 
     const geminiApiKey = process.env.GEMINI_API_KEY?.trim();
 
-    // If GEMINI_API_KEY is available, invoke Gemini 3.5 Flash Lite
     if (geminiApiKey) {
       try {
         const ai = new GoogleGenAI({ apiKey: geminiApiKey });
@@ -429,7 +478,8 @@ Task Instructions:
    - You NEVER execute a bid without their explicit click on 'Confirm & Place Bid'.
    - You strictly respect their agreed ceiling of ₹${proposedBid?.max_proxy || maxPrice || "the agreed limit"} and will never bid past it.
    - You NEVER reveal other students' account details.
-3. If they ask about other students' identity, reiterate that student privacy is protected and accounts are pseudonymous.
+3. MANDATORY: Format ANY asking question to the student in bold text: e.g. **Would you like me to set up an automated proxy bid for you up to your ₹${maxPrice || "budget"} limit?**
+4. If they ask about other students' identity, reiterate that student privacy is protected and accounts are pseudonymous.
 `;
 
         const response = await ai.models.generateContent({
@@ -442,7 +492,8 @@ Task Instructions:
           ],
         });
 
-        const replyText = response.text || "Here are the campus listings matching your request.";
+        let replyText = response.text || "Here are the campus listings matching your request.";
+        replyText = ensureAskingTextBold(replyText);
 
         return NextResponse.json({
           response: replyText,
@@ -458,7 +509,6 @@ Task Instructions:
       }
     }
 
-    // Fallback rule engine if Gemini API call fails or key is missing
     const fallback = await intelligentCampusFallback(userPrompt);
     return NextResponse.json(fallback);
   } catch (err: any) {

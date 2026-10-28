@@ -26,7 +26,13 @@ import {
   Shield,
   Zap,
   Image as ImageIcon,
-  AudioLines
+  AudioLines,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
+  PhoneOff,
+  Radio
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { formatCurrency } from "@/lib/utils";
@@ -111,6 +117,21 @@ export function AiAssistantDrawer({
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
 
+  // ChatGPT & Gemini Live Mode State
+  const [isLiveMode, setIsLiveMode] = useState(false);
+  const [liveStatus, setLiveStatus] = useState<"listening" | "thinking" | "speaking" | "idle">("idle");
+  const [userLiveTranscript, setUserLiveTranscript] = useState("");
+  const [aiLiveTranscript, setAiLiveTranscript] = useState("");
+  const [liveProposedBid, setLiveProposedBid] = useState<ProposedBidData | null>(null);
+  const [audioLevel, setAudioLevel] = useState<number>(0);
+  const [isMicMuted, setIsMicMuted] = useState(false);
+  const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
+
+  const recognitionRef = useRef<any>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+
   // Active Bid Card State
   const [activeBidInputs, setActiveBidInputs] = useState<
     Record<
@@ -155,6 +176,218 @@ export function AiAssistantDrawer({
 
   const handleReset = () => {
     setMessages([]);
+    setUserLiveTranscript("");
+    setAiLiveTranscript("");
+    setLiveProposedBid(null);
+  };
+
+  // Live Audio Functions for Gemini 3.8 Live Mode
+  const startLiveMode = async () => {
+    setIsLiveMode(true);
+    setLiveStatus("listening");
+    setUserLiveTranscript("");
+    setAiLiveTranscript("");
+
+    // Initialize Web Audio API for frequency visualizer
+    try {
+      if (typeof window !== "undefined" && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const analyser = audioCtx.createAnalyser();
+        const source = audioCtx.createMediaStreamSource(stream);
+        source.connect(analyser);
+        analyser.fftSize = 64;
+        audioContextRef.current = audioCtx;
+        analyserRef.current = analyser;
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        const updateAudio = () => {
+          analyser.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) {
+            sum += dataArray[i];
+          }
+          const avg = sum / dataArray.length;
+          setAudioLevel(Math.min(100, Math.round((avg / 255) * 100)));
+          animFrameRef.current = requestAnimationFrame(updateAudio);
+        };
+        updateAudio();
+      }
+    } catch (e) {
+      console.warn("AudioContext error:", e);
+    }
+
+    // Initialize Web Speech Recognition
+    if (typeof window !== "undefined") {
+      const SpeechRecognition =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        const rec = new SpeechRecognition();
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = "en-IN";
+
+        rec.onresult = (event: any) => {
+          let interim = "";
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              setUserLiveTranscript(transcript);
+              handleLiveVoiceQuery(transcript);
+            } else {
+              interim += transcript;
+              setUserLiveTranscript(interim);
+            }
+          }
+        };
+
+        rec.onerror = (e: any) => {
+          console.warn("Speech recognition error:", e);
+        };
+
+        rec.onend = () => {
+          // Keep listening if in live mode and not muted
+          if (isLiveMode && !isMicMuted) {
+            try {
+              rec.start();
+            } catch (e) {}
+          }
+        };
+
+        try {
+          rec.start();
+          recognitionRef.current = rec;
+        } catch (e) {}
+      }
+    }
+  };
+
+  const stopLiveMode = () => {
+    setIsLiveMode(false);
+    setLiveStatus("idle");
+    setAudioLevel(0);
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {}
+    }
+
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+    }
+
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      audioContextRef.current.close().catch(() => {});
+    }
+
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+  };
+
+  const speakLiveResponse = (text: string) => {
+    if (isSpeakerMuted || typeof window === "undefined" || !("speechSynthesis" in window)) {
+      setLiveStatus("listening");
+      return;
+    }
+
+    try {
+      window.speechSynthesis.cancel();
+      const clean = text
+        .replace(/[*#_`~•-]/g, "")
+        .replace(/₹/g, " rupees ")
+        .replace(/\n+/g, ". ");
+
+      const utterance = new SpeechSynthesisUtterance(clean);
+      utterance.rate = 1.05;
+      utterance.pitch = 1.0;
+      utterance.lang = "en-IN";
+
+      utterance.onstart = () => {
+        setLiveStatus("speaking");
+      };
+
+      utterance.onend = () => {
+        setLiveStatus("listening");
+      };
+
+      utterance.onerror = () => {
+        setLiveStatus("listening");
+      };
+
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      setLiveStatus("listening");
+    }
+  };
+
+  const handleLiveVoiceQuery = async (queryText: string) => {
+    if (!queryText.trim()) return;
+
+    setLiveStatus("thinking");
+
+    // Add to chat history
+    const userMsg: ChatMessage = {
+      id: "live-user-" + Date.now(),
+      role: "user",
+      content: queryText,
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, userMsg]);
+
+    try {
+      const historyPayload = messages.slice(-4).map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      const res = await fetch("/api/ai-assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: queryText,
+          history: historyPayload,
+          userId: currentUser?.id,
+        }),
+      });
+
+      if (!res.ok) throw new Error("API failed");
+      const data = await res.json();
+
+      const assistantMsg: ChatMessage = {
+        id: "live-reply-" + Date.now(),
+        role: "assistant",
+        content: data.response || "Here are the campus listings matching your query.",
+        items: data.items,
+        proposedBid: data.proposedBid,
+        timestamp: new Date(),
+      };
+
+      if (data.proposedBid) {
+        const pb = data.proposedBid as ProposedBidData;
+        setLiveProposedBid(pb);
+        setActiveBidInputs((prev) => ({
+          ...prev,
+          [assistantMsg.id]: {
+            amount: pb.proposed_amount,
+            isProxy: pb.is_proxy,
+            maxProxy: pb.max_proxy || pb.proposed_amount + pb.min_bid_increment * 2,
+            isSubmitting: false,
+            error: null,
+          },
+        }));
+      }
+
+      setMessages((prev) => [...prev, assistantMsg]);
+      setAiLiveTranscript(data.response || "");
+
+      // Speak back
+      speakLiveResponse(data.response || "");
+    } catch (err) {
+      console.error("Live query failed:", err);
+      setLiveStatus("listening");
+    }
   };
 
   const sendMessage = async (textToSend?: string) => {
@@ -465,10 +698,20 @@ export function AiAssistantDrawer({
                   <ChevronLeft className="w-4 h-4" />
                 </button>
 
-                {/* Title */}
-                <h2 className="text-sm font-semibold tracking-wide text-white">
-                  Ai writing &amp; bidding
-                </h2>
+                {/* Title & Live Mode Launcher */}
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-semibold tracking-wide text-white">
+                    Ai writing &amp; bidding
+                  </h2>
+                  <button
+                    onClick={startLiveMode}
+                    className="px-2.5 py-1 rounded-full bg-gradient-to-r from-red-600 via-rose-600 to-amber-500 hover:from-red-500 hover:to-rose-500 text-white font-extrabold text-[10px] flex items-center gap-1.5 shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer ring-1 ring-white/30"
+                    title="Launch Gemini 3.8 Live Voice Mode"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                    <span>Live Mode</span>
+                  </button>
+                </div>
 
                 {/* Reset Button */}
                 <button
@@ -576,8 +819,8 @@ export function AiAssistantDrawer({
                           )}
                         </div>
 
-                        {/* Rich Item Preview Cards inside chat */}
-                        {message.items && message.items.length > 0 && (
+                        {/* Rich Item Preview Cards inside chat (Only shown when not displaying a proposed bid) */}
+                        {!message.proposedBid && message.items && message.items.length > 0 && (
                           <div className="w-full mt-2.5 space-y-2">
                             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                               Found Auctions ({message.items.length})
@@ -762,7 +1005,7 @@ export function AiAssistantDrawer({
                     e.preventDefault();
                     sendMessage();
                   }}
-                  className="bg-slate-50 border border-slate-200 rounded-full p-1.5 pl-4 flex items-center gap-2 shadow-xs focus-within:ring-2 focus-within:ring-purple-500/20 focus-within:border-purple-500 transition-all"
+                  className="bg-slate-50 border border-slate-200 rounded-full p-1.5 pl-4 flex items-center gap-2 shadow-xs focus-within:ring-2 focus-within:ring-red-500/20 focus-within:border-red-400 transition-all"
                 >
                   <ImageIcon className="w-4 h-4 text-slate-400 shrink-0" />
                   <input
@@ -772,7 +1015,8 @@ export function AiAssistantDrawer({
                     onChange={(e) => setInput(e.target.value)}
                     placeholder="write your prompt..."
                     disabled={isLoading}
-                    className="w-full bg-transparent text-xs text-slate-800 placeholder-slate-400 focus:outline-hidden font-normal"
+                    className="w-full bg-transparent text-xs text-slate-800 placeholder-slate-400 border-none outline-none focus:outline-none focus:ring-0 shadow-none font-normal"
+                    style={{ outline: "none", border: "none", boxShadow: "none" }}
                   />
 
                   {/* Circular Glowing Audio/Send Button (Matching reference) */}
@@ -788,42 +1032,208 @@ export function AiAssistantDrawer({
                   ) : (
                     <button
                       type="button"
-                      onClick={() => {
-                        if (typeof window !== "undefined") {
-                          const SpeechRecognition =
-                            (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-                          if (SpeechRecognition) {
-                            const rec = new SpeechRecognition();
-                            rec.lang = "en-IN";
-                            rec.onstart = () => setIsListening(true);
-                            rec.onresult = (e: any) => {
-                              const transcript = e.results[0][0].transcript;
-                              setInput(transcript);
-                              sendMessage(transcript);
-                            };
-                            rec.onend = () => setIsListening(false);
-                            rec.onerror = () => setIsListening(false);
-                            rec.start();
-                          } else {
-                            alert("Speech recognition not supported in this browser.");
-                          }
-                        }
-                      }}
-                      className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ring-2 transition-all shadow-md cursor-pointer ${
-                        isListening
-                          ? "bg-red-600 text-white ring-red-400 animate-pulse"
-                          : "bg-slate-950 text-white ring-purple-500/40 hover:scale-105"
-                      }`}
-                      aria-label="Gemini 3.8 Live Voice"
-                      title="Speak with Gemini 3.8 Live"
+                      onClick={startLiveMode}
+                      className="w-9 h-9 rounded-full bg-slate-950 text-white flex items-center justify-center shrink-0 ring-2 ring-purple-500/40 hover:ring-red-500/60 hover:scale-105 active:scale-95 transition-all shadow-md cursor-pointer group"
+                      aria-label="Gemini 3.8 Live Voice Mode"
+                      title="Launch Gemini 3.8 Live Voice Mode"
                     >
-                      <AudioLines className="w-4 h-4 text-purple-300" />
+                      <AudioLines className="w-4 h-4 text-purple-300 group-hover:text-red-400 transition-colors" />
                     </button>
                   )}
                 </form>
               </div>
 
             </div>
+
+            {/* Immersive ChatGPT & Gemini Live Mode Screen Overlay */}
+            {isLiveMode && (
+              <div className="absolute inset-0 z-30 bg-gradient-to-b from-[#090414] via-[#12071f] to-[#07010e] text-white flex flex-col justify-between p-6 animate-in fade-in duration-300">
+                
+                {/* Top Live Mode Navigation Bar */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/90 border border-slate-800 text-xs font-semibold">
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                    <span className="text-white font-bold">Gemini 3.8 Live</span>
+                    <span className="text-slate-400 text-[10px]">• Low Latency</span>
+                  </div>
+                  <button
+                    onClick={stopLiveMode}
+                    className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
+                    title="Exit Live Mode"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Centerpiece: Organic Fluid Sound Sphere & Dynamic Resonance */}
+                <div className="flex-1 flex flex-col items-center justify-center my-auto py-4">
+                  
+                  {/* Morphing Liquid Orb */}
+                  <div className="relative w-44 h-44 flex items-center justify-center my-2">
+                    {/* Ambient Glow Aura */}
+                    <div
+                      className={`absolute inset-0 rounded-full transition-all duration-150 ${
+                        liveStatus === "listening"
+                          ? "bg-red-500/25 blur-2xl animate-pulse"
+                          : liveStatus === "speaking"
+                          ? "bg-rose-500/35 blur-3xl animate-pulse"
+                          : "bg-purple-600/20 blur-xl"
+                      }`}
+                      style={{
+                        transform: `scale(${1 + (audioLevel / 100) * 0.4})`,
+                      }}
+                    />
+
+                    {/* Concentric Ripple Ring */}
+                    <div
+                      className="absolute inset-2 rounded-full border border-red-400/30 transition-transform duration-100"
+                      style={{
+                        transform: `scale(${1 + (audioLevel / 100) * 0.2})`,
+                      }}
+                    />
+
+                    {/* Core 3D Liquid Iridescent Sphere */}
+                    <div className={`relative w-28 h-28 rounded-full shadow-2xl p-0.5 overflow-hidden ring-4 ring-white/30 flex items-center justify-center transition-transform duration-150 ${
+                      liveStatus === "thinking" ? "animate-spin" : ""
+                    }`}>
+                      <div className="w-full h-full rounded-full bg-gradient-to-tr from-[#ff007a] via-[#7928ca] to-[#00dfd8] flex items-center justify-center">
+                        <div className="w-24 h-24 rounded-full bg-gradient-to-br from-indigo-950 via-purple-900 to-rose-700 flex items-center justify-center shadow-inner">
+                          {liveStatus === "listening" && <Mic className="w-8 h-8 text-white animate-pulse" />}
+                          {liveStatus === "thinking" && <Sparkles className="w-8 h-8 text-amber-300 animate-spin" />}
+                          {liveStatus === "speaking" && <Volume2 className="w-8 h-8 text-white animate-bounce" />}
+                          {liveStatus === "idle" && <AudioLines className="w-8 h-8 text-white/80" />}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* State Pill */}
+                  <div className="mt-5 flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900/90 border border-slate-700 text-xs font-semibold text-slate-200 shadow-md">
+                    {liveStatus === "listening" && (
+                      <>
+                        <span className="w-2 h-2 rounded-full bg-red-400 animate-ping" />
+                        <span>Listening to your voice...</span>
+                      </>
+                    )}
+                    {liveStatus === "thinking" && (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                        <span>Gemini 3.5 Flash Lite thinking...</span>
+                      </>
+                    )}
+                    {liveStatus === "speaking" && (
+                      <>
+                        <Volume2 className="w-3.5 h-3.5 text-rose-400 animate-bounce" />
+                        <span>Gemini 3.8 Live speaking...</span>
+                      </>
+                    )}
+                    {liveStatus === "idle" && <span>Tap mic to speak</span>}
+                  </div>
+
+                  {/* Live Subtitle Transcript */}
+                  <div className="w-full max-w-sm mt-5 text-center min-h-[55px] px-2">
+                    {userLiveTranscript && (
+                      <p className="text-xs text-slate-300 italic mb-1.5 font-medium">
+                        "{userLiveTranscript}"
+                      </p>
+                    )}
+                    {aiLiveTranscript ? (
+                      <div className="text-xs text-slate-100 font-medium leading-relaxed bg-slate-900/60 p-3 rounded-2xl border border-slate-800 text-left">
+                        {renderFormattedText(aiLiveTranscript.slice(0, 240) + (aiLiveTranscript.length > 240 ? "..." : ""))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500">
+                        Try saying: "Find me a cycle under ₹2,000" or "Have the app bid for me"
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Floating Safe Bid Proposal Card in Live Mode */}
+                  {liveProposedBid && (
+                    <div className="w-full max-w-sm mt-4 bg-slate-900/95 border-2 border-red-500/60 rounded-2xl p-3.5 shadow-2xl flex items-center justify-between gap-3 animate-in slide-in-from-bottom-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[10px] text-red-400 font-bold uppercase tracking-wider">
+                          Safe Bid Drafted
+                        </div>
+                        <div className="text-xs font-bold text-white truncate">
+                          {liveProposedBid.listing_title}
+                        </div>
+                        <div className="text-xs text-slate-300 mt-0.5">
+                          Bid: <strong>{formatCurrency(liveProposedBid.proposed_amount)}</strong> • Ceiling: <strong>{formatCurrency(liveProposedBid.max_proxy || 2000)}</strong>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          handleConfirmBid("live-reply-" + Date.now(), liveProposedBid);
+                          setLiveProposedBid(null);
+                        }}
+                        className="px-3 py-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-extrabold text-xs shadow-md shrink-0 flex items-center gap-1 cursor-pointer"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Authorize</span>
+                      </button>
+                    </div>
+                  )}
+
+                </div>
+
+                {/* Bottom Studio Voice Dock (ChatGPT / Gemini Live style) */}
+                <div className="flex items-center justify-center gap-5 pt-3 pb-1 border-t border-slate-800/80">
+                  {/* Mic Mute Toggle */}
+                  <button
+                    onClick={() => {
+                      if (isMicMuted) {
+                        setIsMicMuted(false);
+                        if (recognitionRef.current) {
+                          try { recognitionRef.current.start(); } catch (e) {}
+                        }
+                      } else {
+                        setIsMicMuted(true);
+                        if (recognitionRef.current) {
+                          try { recognitionRef.current.stop(); } catch (e) {}
+                        }
+                      }
+                    }}
+                    className={`w-12 h-12 rounded-full flex items-center justify-center transition-all cursor-pointer ${
+                      isMicMuted
+                        ? "bg-slate-800 text-slate-400 hover:bg-slate-700"
+                        : "bg-white/10 text-white hover:bg-white/20 ring-2 ring-white/20"
+                    }`}
+                    title={isMicMuted ? "Unmute Mic" : "Mute Mic"}
+                  >
+                    {isMicMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5 text-red-400" />}
+                  </button>
+
+                  {/* Red End Live Mode (Phone Hang-up) Button */}
+                  <button
+                    onClick={stopLiveMode}
+                    className="w-14 h-14 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center shadow-lg shadow-red-950/60 hover:scale-105 active:scale-95 transition-all cursor-pointer ring-4 ring-red-500/30"
+                    title="End Live Voice Session"
+                  >
+                    <PhoneOff className="w-6 h-6" />
+                  </button>
+
+                  {/* Speaker Output Toggle */}
+                  <button
+                    onClick={() => {
+                      setIsSpeakerMuted(!isSpeakerMuted);
+                      if (!isSpeakerMuted && typeof window !== "undefined" && "speechSynthesis" in window) {
+                        window.speechSynthesis.cancel();
+                      }
+                    }}
+                    className={`w-12 h-12 rounded-full flex items-center justify-center transition-all cursor-pointer ${
+                      isSpeakerMuted
+                        ? "bg-slate-800 text-slate-400 hover:bg-slate-700"
+                        : "bg-white/10 text-white hover:bg-white/20 ring-2 ring-white/20"
+                    }`}
+                    title={isSpeakerMuted ? "Enable Voice Readout" : "Mute Voice Readout"}
+                  >
+                    {isSpeakerMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5 text-rose-300" />}
+                  </button>
+                </div>
+
+              </div>
+            )}
 
           </div>
         </div>
