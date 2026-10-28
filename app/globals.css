@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Industrial Auction Design Primitives */
+@layer components {
+  .auction-card {
+    @apply bg-white border border-slate-200 rounded-lg overflow-hidden transition-all duration-200 hover:shadow-cardHover hover:border-slate-300 flex flex-col;
+  }
+  
+  .badge-timer {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold tracking-wide uppercase bg-slate-900/80 text-white backdrop-blur-sm rounded;
+  }
+
+  .badge-timer-urgent {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold tracking-wide uppercase bg-red-600 text-white animate-pulse rounded;
+  }
+
+  .btn-bid {
+    @apply inline-flex items-center justify-center font-semibold text-sm px-4 py-2 rounded border border-red-600 text-red-600 hover:bg-red-600 hover:text-white transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1;
+  }
+
+  .btn-bid-solid {
+    @apply inline-flex items-center justify-center font-semibold text-sm px-4 py-2 rounded bg-red-600 text-white hover:bg-red-700 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1;
+  }
+}
