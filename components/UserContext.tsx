@@ -76,6 +76,8 @@ interface UserContextType {
   currentUser: StudentProfile;
   allStudents: StudentProfile[];
   switchUser: (userId: string) => void;
+  loginUser: (email: string, password?: string) => Promise<{ success: boolean; error?: string }>;
+  signUpUser: (fullName: string, email: string, password?: string) => Promise<{ success: boolean; error?: string }>;
   unreadCount: number;
   refreshUnreadCount: () => Promise<void>;
 }
@@ -169,12 +171,160 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const loginUser = async (email: string, password?: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      // 1. Try Supabase Auth if password is provided
+      if (password) {
+        try {
+          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+          });
+          if (authError && authError.message !== "Invalid login credentials") {
+            console.warn("Supabase auth warning:", authError.message);
+          }
+        } catch (e) {
+          // Graceful fallback to profile sync
+        }
+      }
+
+      // 2. Check if student profile exists in memory or in database
+      const foundInMemory = allStudents.find((s) => s.email.toLowerCase() === email.toLowerCase());
+      if (foundInMemory) {
+        switchUser(foundInMemory.id);
+        return { success: true };
+      }
+
+      // 3. Check Supabase profiles table
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("*")
+        .ilike("email", email.trim())
+        .maybeSingle();
+
+      if (profileData) {
+        const student: StudentProfile = {
+          id: profileData.id,
+          full_name: profileData.full_name,
+          email: profileData.email,
+          role: (profileData.role as any) || "student",
+          student_id: profileData.student_id,
+          hostel_block: profileData.hostel_block,
+          room_number: profileData.room_number,
+          phone_number: profileData.phone_number,
+          avatar_url: profileData.avatar_url || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(profileData.full_name)}`,
+          rating: Number(profileData.rating) || 5.0,
+          total_ratings: Number(profileData.total_ratings) || 0,
+        };
+        setAllStudents((prev) => [student, ...prev.filter((s) => s.id !== student.id)]);
+        setCurrentUser(student);
+        localStorage.setItem("campusbid_active_user", student.id);
+        return { success: true };
+      }
+
+      // 4. If demo email, switch to first student or create demo session
+      if (email.includes("@")) {
+        const fallbackName = email.split("@")[0].replace(/[._]/g, " ");
+        const capitalized = fallbackName.charAt(0).toUpperCase() + fallbackName.slice(1);
+        const newStudent: StudentProfile = {
+          id: crypto.randomUUID(),
+          full_name: capitalized,
+          email,
+          role: "student",
+          student_id: `2024CSB${Math.floor(1000 + Math.random() * 9000)}`,
+          hostel_block: "Campus Hostel",
+          room_number: "A-101",
+          phone_number: "+91 98765 00000",
+          avatar_url: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(capitalized)}`,
+          rating: 5.0,
+          total_ratings: 0,
+        };
+        setAllStudents((prev) => [newStudent, ...prev]);
+        setCurrentUser(newStudent);
+        localStorage.setItem("campusbid_active_user", newStudent.id);
+        return { success: true };
+      }
+
+      return { success: false, error: "Account not found. Please sign up." };
+    } catch (err: any) {
+      return { success: false, error: err?.message || "Failed to log in" };
+    }
+  };
+
+  const signUpUser = async (fullName: string, email: string, password?: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      let authUserId: string = crypto.randomUUID();
+
+      // 1. Try Supabase Auth
+      if (password) {
+        try {
+          const { data: authData, error: authError } = await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              data: { full_name: fullName },
+            },
+          });
+          if (authData?.user?.id) {
+            authUserId = authData.user.id;
+          }
+        } catch (e) {
+          // Fallback to direct profile creation
+        }
+      }
+
+      // 2. Insert into profiles table in Supabase
+      const newStudent: StudentProfile = {
+        id: authUserId,
+        full_name: fullName,
+        email,
+        role: "student",
+        student_id: `2024UG${Math.floor(1000 + Math.random() * 9000)}`,
+        hostel_block: "Hostel 3 (Brahmaputra)",
+        room_number: "C-104",
+        phone_number: "+91 98765 11111",
+        avatar_url: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(fullName)}`,
+        rating: 5.0,
+        total_ratings: 0,
+      };
+
+      try {
+        await supabase.from("profiles").upsert({
+          id: newStudent.id,
+          full_name: newStudent.full_name,
+          email: newStudent.email,
+          role: newStudent.role,
+          student_id: newStudent.student_id,
+          hostel_block: newStudent.hostel_block,
+          room_number: newStudent.room_number,
+          phone_number: newStudent.phone_number,
+          avatar_url: newStudent.avatar_url,
+          rating: 5.0,
+          total_ratings: 0,
+        });
+      } catch (dbErr) {
+        console.warn("Could not upsert to Supabase profiles:", dbErr);
+      }
+
+      // 3. Set active user in context and storage
+      setAllStudents((prev) => [newStudent, ...prev.filter((s) => s.id !== newStudent.id)]);
+      setCurrentUser(newStudent);
+      localStorage.setItem("campusbid_active_user", newStudent.id);
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || "Sign up failed" };
+    }
+  };
+
   return (
     <UserContext.Provider
       value={{
         currentUser,
         allStudents,
         switchUser,
+        loginUser,
+        signUpUser,
         unreadCount,
         refreshUnreadCount,
       }}

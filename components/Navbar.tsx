@@ -164,10 +164,18 @@ export function Navbar({
             {/* Log In Link */}
             <Link
               href="/login"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 text-slate-800 hover:bg-slate-100 transition-colors shadow-2xs"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold rounded-lg border border-slate-300 text-slate-800 hover:bg-slate-100 transition-colors"
             >
               <User className="w-3.5 h-3.5" />
               <span>Log In</span>
+            </Link>
+
+            {/* Sign Up Link */}
+            <Link
+              href="/signup"
+              className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors shadow-2xs"
+            >
+              <span>Sign Up</span>
             </Link>
 
             {/* Student Switcher Dropdown */}

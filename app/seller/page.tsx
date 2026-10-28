@@ -65,6 +65,7 @@ export default function SellerPage() {
       />
       <AiAssistantDrawer
         isOpen={isAiDrawerOpen}
+        onOpen={() => setIsAiDrawerOpen(true)}
         onClose={() => setIsAiDrawerOpen(false)}
         onSelectListing={(id: string) => {
           setIsAiDrawerOpen(false);

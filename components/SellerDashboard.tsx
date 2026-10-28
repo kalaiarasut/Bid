@@ -603,16 +603,16 @@ export function SellerDashboard({
               </div>
             </div>
 
-            {/* AI Assistant Pill Button */}
+            {/* AI Assistant Pill Button (Red theme) */}
             <button
               onClick={onOpenAiDrawer}
-              className="flex items-center border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-sm text-slate-700 gap-2 hover:bg-slate-50 transition-colors cursor-pointer"
+              className="flex items-center border border-red-200 rounded-lg px-2.5 py-1.5 bg-red-50/40 hover:bg-red-50 text-sm text-slate-800 gap-2 transition-colors cursor-pointer group"
             >
-              <span className="bg-[#ede7fc] text-[#6b3fe3] text-xs font-semibold px-1.5 py-0.5 rounded">
+              <span className="bg-red-100 text-red-600 font-bold text-xs px-1.5 py-0.5 rounded group-hover:bg-red-200 transition-colors">
                 AI
               </span>
-              <span className="font-medium text-slate-700 text-xs sm:text-sm">Ask AI</span>
-              <span className="hidden sm:inline text-xs text-slate-400 border border-slate-200 px-1.5 py-0.5 rounded bg-slate-50 font-sans">
+              <span className="font-semibold text-slate-800 text-xs sm:text-sm">Ask AI</span>
+              <span className="hidden sm:inline text-xs text-red-400 border border-red-200 px-1.5 py-0.5 rounded bg-white font-sans">
                 Ctrl /
               </span>
             </button>

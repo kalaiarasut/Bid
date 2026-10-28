@@ -81,18 +81,28 @@ function SafeUserConsumer(): { currentUser: StudentProfile } {
 
 export interface AiAssistantDrawerProps {
   isOpen?: boolean;
+  onOpen?: () => void;
   onClose?: () => void;
   onSelectListing?: (id: string) => void;
 }
 
 export function AiAssistantDrawer({
   isOpen: controlledIsOpen,
+  onOpen: controlledOnOpen,
   onClose: controlledOnClose,
   onSelectListing,
 }: AiAssistantDrawerProps = {}) {
   const [internalIsOpen, setInternalIsOpen] = useState(false);
   const isControlled = typeof controlledIsOpen === "boolean";
   const isOpen = isControlled ? controlledIsOpen : internalIsOpen;
+
+  const handleOpen = () => {
+    if (controlledOnOpen) {
+      controlledOnOpen();
+    } else {
+      setInternalIsOpen(true);
+    }
+  };
 
   const { currentUser } = SafeUserConsumer();
 
@@ -397,25 +407,28 @@ export function AiAssistantDrawer({
 
   return (
     <>
-      {/* Redesigned Floating AI Trigger Icon (Matching Reference Image) */}
+      {/* Redesigned Floating AI Trigger Icon (Red Theme matching CampusBid with Red Dot) */}
       {!isOpen && (
         <button
-          onClick={() => (isControlled && controlledOnClose ? null : setInternalIsOpen(true))}
-          className="fixed bottom-6 right-6 z-40 group flex items-center gap-2.5 p-1.5 pr-4 bg-slate-950/95 hover:bg-black text-white rounded-full shadow-2xl backdrop-blur-md border border-white/10 hover:scale-105 active:scale-95 transition-all duration-300 ring-2 ring-purple-500/40 hover:ring-purple-400 cursor-pointer"
+          onClick={handleOpen}
+          className="fixed bottom-6 right-6 z-40 group flex items-center gap-2.5 p-1.5 pr-4 bg-gradient-to-r from-red-600 via-rose-600 to-red-700 hover:from-red-500 hover:to-rose-500 text-white rounded-full shadow-2xl shadow-red-950/40 border border-red-400/40 hover:scale-105 active:scale-95 transition-all duration-300 ring-2 ring-red-400/50 hover:ring-red-300 cursor-pointer"
           aria-label="Open CampusBid AI Assistant"
         >
-          {/* Iridescent Glowing Orb Icon */}
-          <div className="relative w-9 h-9 rounded-full bg-gradient-to-tr from-[#ff007a] via-[#7928ca] to-[#00dfd8] p-0.5 shadow-lg shadow-purple-500/30">
-            <div className="w-full h-full bg-slate-950 rounded-full flex items-center justify-center">
-              <Sparkles className="w-4 h-4 text-white animate-pulse" />
+          {/* Iridescent Glowing Orb Icon in Red/Amber */}
+          <div className="relative w-9 h-9 rounded-full bg-gradient-to-tr from-amber-300 via-rose-500 to-red-700 p-0.5 shadow-md shadow-red-950/40">
+            <div className="w-full h-full bg-red-950 rounded-full flex items-center justify-center">
+              <Sparkles className="w-4 h-4 text-amber-200 animate-pulse" />
             </div>
           </div>
           <div className="flex flex-col text-left">
             <span className="text-xs font-bold tracking-tight text-white flex items-center gap-1.5">
               Ask AI
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-300 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-400"></span>
+              </span>
             </span>
-            <span className="text-[10px] text-slate-400 font-medium">CampusBid Assistant</span>
+            <span className="text-[10px] text-red-100/90 font-medium">CampusBid Assistant</span>
           </div>
         </button>
       )}

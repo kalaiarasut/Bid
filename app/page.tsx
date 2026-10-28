@@ -468,6 +468,7 @@ export default function HomePage() {
 
       <AiAssistantDrawer
         isOpen={isAiDrawerOpen}
+        onOpen={() => setIsAiDrawerOpen(true)}
         onClose={() => setIsAiDrawerOpen(false)}
         onSelectListing={(id: string) => setSelectedListingId(id)}
       />

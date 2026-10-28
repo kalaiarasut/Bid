@@ -8,7 +8,7 @@ import { useUser } from "@/components/UserContext";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { allStudents, switchUser } = useUser();
+  const { allStudents, switchUser, loginUser, signUpUser } = useUser();
 
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [fullName, setFullName] = useState("");
@@ -20,6 +20,7 @@ export default function LoginPage() {
   const [isError, setIsError] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [isSuccess, setIsSuccess] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Character emotional & physical animation state
   const charState: CharacterState = {
@@ -27,9 +28,10 @@ export default function LoginPage() {
     isPasswordVisible,
     isError,
     isSuccess,
+    passwordLength: password.length,
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!email) {
@@ -39,19 +41,13 @@ export default function LoginPage() {
     }
 
     if (mode === "login") {
-      // Demo: if password is wrong (matches the video where wrong password shakes and characters frown)
-      if (
-        password.length > 0 &&
-        password !== "777G555A" &&
-        password !== "password" &&
-        password !== "campus123" &&
-        password !== "anna123"
-      ) {
+      setIsSubmitting(true);
+      const res = await loginUser(email, password);
+      setIsSubmitting(false);
+
+      if (!res.success) {
         setIsError(true);
-        setErrorMessage("Incorrect password. Please try again.");
-        setTimeout(() => {
-          setIsError(false);
-        }, 3200);
+        setErrorMessage(res.error || "Incorrect login credentials.");
         return;
       }
     } else {
@@ -64,9 +60,16 @@ export default function LoginPage() {
       if (password.length < 6) {
         setIsError(true);
         setErrorMessage("Password must be at least 6 characters");
-        setTimeout(() => {
-          setIsError(false);
-        }, 3200);
+        return;
+      }
+
+      setIsSubmitting(true);
+      const res = await signUpUser(fullName, email, password);
+      setIsSubmitting(false);
+
+      if (!res.success) {
+        setIsError(true);
+        setErrorMessage(res.error || "Sign up failed.");
         return;
       }
     }
@@ -75,14 +78,9 @@ export default function LoginPage() {
     setIsError(false);
     setIsSuccess(true);
 
-    const matched = allStudents.find((s) => s.email.toLowerCase() === email.toLowerCase());
-    if (matched) {
-      switchUser(matched.id);
-    }
-
     setTimeout(() => {
       router.push("/");
-    }, 1200);
+    }, 1000);
   };
 
   const handleGoogleAuth = () => {
@@ -100,7 +98,7 @@ export default function LoginPage() {
         {/* ============================================================== */}
         {/* LEFT COLUMN: Animated Interactive Characters                   */}
         {/* ============================================================== */}
-        <section className="relative flex-1 md:w-[57%] bg-[#e8e8e8] flex flex-col justify-end items-center pt-8 px-4 sm:px-8 pb-0 overflow-hidden min-h-[360px] md:min-h-full">
+        <section className="relative flex-1 md:w-[57%] bg-[#e8e8e8] flex flex-col justify-end items-center pt-8 px-2 sm:px-4 pb-0 overflow-hidden min-h-[360px] md:min-h-full">
           {/* Subtle back link */}
           <Link
             href="/"
@@ -350,9 +348,10 @@ export default function LoginPage() {
               {mode === "login" ? (
                 <>
                   Don&apos;t have an account?{" "}
-                  <button
-                    type="button"
-                    onClick={() => {
+                  <Link
+                    href="/signup"
+                    onClick={(e) => {
+                      // Also support in-place toggle if clicked
                       setMode("signup");
                       setIsError(false);
                       setPassword("");
@@ -360,14 +359,14 @@ export default function LoginPage() {
                     className="font-bold text-slate-900 hover:underline cursor-pointer ml-1"
                   >
                     Sign Up
-                  </button>
+                  </Link>
                 </>
               ) : (
                 <>
                   Already have an account?{" "}
-                  <button
-                    type="button"
-                    onClick={() => {
+                  <Link
+                    href="/login"
+                    onClick={(e) => {
                       setMode("login");
                       setIsError(false);
                       setPassword("");
@@ -375,7 +374,7 @@ export default function LoginPage() {
                     className="font-bold text-slate-900 hover:underline cursor-pointer ml-1"
                   >
                     Log In
-                  </button>
+                  </Link>
                 </>
               )}
             </div>
