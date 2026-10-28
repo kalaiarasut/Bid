@@ -211,7 +211,9 @@ export default function HomePage() {
 
         // Category
         if (filters.category !== "all") {
-          if (item.category.toLowerCase() !== filters.category.toLowerCase()) {
+          const itemCat = item.category.toLowerCase();
+          const filterCat = filters.category.toLowerCase();
+          if (itemCat !== filterCat && !itemCat.includes(filterCat) && !filterCat.includes(itemCat)) {
             return false;
           }
         }
